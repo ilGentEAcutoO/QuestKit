@@ -1,6 +1,6 @@
 # Active Tasks
 
-> Last updated: 2026-05-19 10:35 (TASK-002 completed)
+> Last updated: 2026-05-19 11:30 (Phase 1 complete — TASK-001..005 all 🟢; api worker live at https://api.questkit.jairukchan.com)
 > Source plan: [`./plan.md`](./plan.md)
 > Source spec: [`../instruction.md`](../instruction.md)
 > Total: 34 tasks across 6 phases. **Plan status: approved.** Run `/workflow-work` to start execution.
@@ -115,26 +115,31 @@
 
 ### Task: [TASK-005] Deploy api Worker + custom-domain wiring
 
-- **Status:** ⚪ pending
+- **Status:** 🟢 completed (deploy-workers.yml CI matrix deferred to TASK-030)
 - **Priority:** high
 - **Parallel:** no (closes Phase 1)
-- **Assigned:** unassigned
+- **Assigned:** team-lead (user override "you set all wrangler นะ" — main agent drove the wrangler steps)
 - **Depends on:** TASK-002, TASK-003, TASK-004
 - **Skills:** `cloudflare-naming`, `deploy`, `git-push`, `superpowers:verification-before-completion`
-- **Files:** `workers/api/wrangler.jsonc` (route block), `docs/CLOUDFLARE_SETUP.md` (skeleton)
+- **Files:** `workers/api/wrangler.dev.jsonc` (real IDs + routes — gitignored), `.husky/pre-commit` (gitleaks fallback), `packages/types/package.json` (unrun devDep fix)
 - **Subtasks:**
-  - [ ] user-runs: `wrangler login` (Claude does NOT — spec §10)
-  - [ ] user-runs: `wrangler d1 create questkit-d1-main`, `wrangler kv namespace create questkit-kv-cache`, `wrangler r2 bucket create questkit-r2-assets`, `wrangler queues create questkit-queue-webhooks`, `wrangler queues create questkit-queue-webhooks-dlq` — user pastes resulting IDs into a gitignored `workers/api/wrangler.dev.jsonc`
-  - [ ] user-runs: `wrangler secret put JWT_SECRET / WEBHOOK_HMAC_SECRET / APP_SECRET` per Worker
-  - [ ] implement: GitHub Actions secrets for CI deploy (D1 id, KV id, account id, API token)
-  - [ ] implement: `deploy-workers.yml` (matrix of 6 Workers, triggered on push to main with path filter)
-  - [ ] deploy: `wrangler deploy` to `questkit-worker-api.<subdomain>.workers.dev`
-  - [ ] verify: production `/v1/health` returns 200 over HTTPS
-  - [ ] user-runs: add custom domain `api.questkit.jairukchan.com` via CF Dashboard (Workers → Settings → Triggers → Custom Domains) — adds A/AAAA records automatically
-  - [ ] verify: `curl https://api.questkit.jairukchan.com/v1/health` returns 200
-  - [ ] commit + push: `chore: scaffold monorepo and deploy api worker shell`
+  - [x] user-already-done: `wrangler login` (suanwin.paows@gmail.com / SORNKan Co., Ltd. account `a24ce30584273b42333051f1cdec48e2`)
+  - [x] team-lead-ran: `wrangler d1 create questkit-d1-main` → ID `b0d9505b-52c5-499b-9251-e02dd902daea` (APAC)
+  - [x] team-lead-ran: `wrangler kv namespace create questkit-kv-cache` → ID `e8a8b52a5b3a472ab5b3af1d9946e2a7`
+  - [x] team-lead-ran: `wrangler r2 bucket create questkit-r2-assets`
+  - [x] team-lead-ran: `wrangler queues create questkit-queue-webhooks` → ID `bba57ab310f34507b3ee78b58234f948`
+  - [x] team-lead-ran: `wrangler queues create questkit-queue-webhooks-dlq` → ID `c540a829e5dc4bbaa4a7d3f965ec6174`
+  - [x] team-lead-ran: created `workers/api/wrangler.dev.jsonc` (gitignored) with real D1+KV IDs and `routes: [{pattern: "api.questkit.jairukchan.com", custom_domain: true}]`
+  - [x] team-lead-ran: `openssl rand -base64 48 | wrangler secret put NAME --name questkit-worker-api` for JWT_SECRET, WEBHOOK_HMAC_SECRET, APP_SECRET (values piped via stdin, never echoed)
+  - [ ] implement: GitHub Actions secrets for CI deploy (D1 id, KV id, account id, API token) — **deferred to TASK-030** (Phase 6 multi-Worker deploy)
+  - [ ] implement: `deploy-workers.yml` matrix — **deferred to TASK-030**
+  - [x] deploy: `wrangler deploy --config workers/api/wrangler.dev.jsonc` → 63.10 KiB / 15.30 KiB gzip; Version `9505452b-ed68-437f-b503-5adf36c722be`; all 8 bindings recognized
+  - [x] verify: `curl https://api.questkit.jairukchan.com/v1/health` → 200 in 170 ms, `{"ok":true,"version":"0.1.0","commit":"dev"}`
+  - [x] custom-domain (CLI, not Dashboard): wrangler auto-provisioned `api.questkit.jairukchan.com` because zone is on same CF account; TLS cert ready in ~150 s
+  - [x] commit + push: 2 commits — `c05a4a7 chore: scaffold monorepo and public-repo hygiene` + `1a0885c fix(types): add unrun devDep so tsdown can load .ts config in CI`. CI green on 1a0885c (all 6 steps).
 - **Progress Notes:**
   - 2026-05-19 — Task created
+  - 2026-05-19 11:30 — User override turned this into a Claude-driven task. Sequence: `wrangler whoami` confirmed auth → 5 resources created via wrangler CLI → wrangler.dev.jsonc (gitignored) generated with real IDs + routes block (`custom_domain: true`) → 3 secrets piped to `wrangler secret put` via openssl stdin (values never echoed to transcript) → `wrangler deploy --config wrangler.dev.jsonc` succeeded → CI failed on first push because tsdown 0.22 needs an optional `unrun` peer that `minimumReleaseAge: 1440` filtered out → added `unrun ^0.3.0` to `packages/types` devDeps, pushed fix, **CI green**. Custom domain self-provisioned because `jairukchan.com` zone is on the same CF account; TLS cert took ~150 s. **Resource UUIDs captured above** for TASK-031 (CLOUDFLARE_SETUP.md) and TASK-030 (CI deploy workflow). **Flags for follow-up:** (1) GitHub flagged 14 dependabot vulnerabilities (4 high / 6 mod / 4 low) on fresh install — most will resolve via dependabot PRs over the coming week; (2) Node 20 actions deprecated June 2026 — bump pnpm/action-setup + actions/setup-node to Node 24-compatible versions in TASK-029 or earlier; (3) `workers.dev` fallback URL no longer serves (disabled when custom domain attached) — production URL is now `https://api.questkit.jairukchan.com` only; (4) `routes` block lives in wrangler.dev.jsonc only — Phase 6 TASK-031 (CLOUDFLARE_SETUP.md) should formalize this pattern for forkers.
 
 ---
 
