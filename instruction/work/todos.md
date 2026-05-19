@@ -1,6 +1,6 @@
 # Active Tasks
 
-> Last updated: 2026-05-19 15:40 (Phase 2 complete — TASK-006..013 all 🟢. Pending: redeploy `questkit-worker-api` with Phase 2 routes + Phase 2 commit `feat: core SDK with rule engine, Durable Objects, and Analytics Engine`.)
+> Last updated: 2026-05-19 16:00 (**Phase 2 SHIPPED** — TASK-006..013 all 🟢. Worker deployed Version `56a4784b-0399-4e7a-9947-9c6bff3bc468`. Commits on `main`: `5313210` (feat), `b91b047` (fix CI cf-typegen), `4398902` (fix CI Node 20→22), `2b562c3` (fix CI wrangler.test.jsonc). **Verify CI: green ✅** — lint, typecheck, 153 worker tests + 87 SDK tests, gitleaks, audit all pass. **Pending user action:** register `QUESTKIT_APP_SECRET` in GitHub repo secrets so Newman job can authenticate. Value = same `APP_SECRET` set via `wrangler secret put` in TASK-005.)
 > Source plan: [`./plan.md`](./plan.md)
 > Source spec: [`../instruction.md`](../instruction.md)
 > Total: 34 tasks across 6 phases. **Plan status: approved.** Run `/workflow-work` to start execution.
