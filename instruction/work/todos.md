@@ -1,6 +1,6 @@
 # Active Tasks
 
-> Last updated: 2026-05-19 16:00 (**Phase 2 SHIPPED** — TASK-006..013 all 🟢. Worker deployed Version `56a4784b-0399-4e7a-9947-9c6bff3bc468`. Commits on `main`: `5313210` (feat), `b91b047` (fix CI cf-typegen), `4398902` (fix CI Node 20→22), `2b562c3` (fix CI wrangler.test.jsonc). **Verify CI: green ✅** — lint, typecheck, 153 worker tests + 87 SDK tests, gitleaks, audit all pass. **Pending user action:** register `QUESTKIT_APP_SECRET` in GitHub repo secrets so Newman job can authenticate. Value = same `APP_SECRET` set via `wrangler secret put` in TASK-005.)
+> Last updated: 2026-05-19 21:45 (**Phase 3 in progress** — TASK-014 🟢, TASK-015 🟢, TASK-016 🟢 (109/109 tests, 93% line cov), TASK-017 🟢 (168/168 worker tests incl. 15 new for AI svc+route; 123/123 react tests incl. 14 new for hook+component), TASK-018 🟢. Next: TASK-019 (closes Phase 3). Phase 2 SHIPPED — TASK-006..013 all 🟢. Worker deployed Version `56a4784b-0399-4e7a-9947-9c6bff3bc468`. **Pending user action:** register `QUESTKIT_APP_SECRET` in GitHub repo secrets so Newman job can authenticate. Value = same `APP_SECRET` set via `wrangler secret put` in TASK-005.)
 > Source plan: [`./plan.md`](./plan.md)
 > Source spec: [`../instruction.md`](../instruction.md)
 > Total: 34 tasks across 6 phases. **Plan status: approved.** Run `/workflow-work` to start execution.
@@ -330,100 +330,129 @@
 
 ### Task: [TASK-014] `@questkit/react` scaffold + theme
 
-- **Status:** ⚪ pending
+- **Status:** 🟢 completed
 - **Priority:** high
 - **Parallel:** no
-- **Assigned:** unassigned
+- **Assigned:** main agent (Opus 4.7)
 - **Depends on:** TASK-013
 - **Skills:** `frontend-design:frontend-design`, `web-design-guidelines`
-- **Files:** `packages/react/{package.json,tsdown.config.ts,src/{index.ts,provider.tsx,styles/theme.css}}`, `packages/react/jest.config.ts`, `packages/react/test/setup.ts`
+- **Files:** `packages/react/{package.json,tsdown.config.ts,tsconfig.json,jest.config.cjs,scripts/copy-styles.mjs,src/{index.ts,provider.tsx,styles/theme.css},test/setup.ts,README.md}`
 - **Subtasks:**
-  - [ ] implement: `package.json` peerDeps `react@^18.3 || ^19`, devDeps from catalog
-  - [ ] implement: tsdown config (esm+cjs+dts, `deps.neverBundle: ['react','react-dom','@questkit/core','@questkit/types']`)
-  - [ ] implement: Tailwind v4 `theme.css` with `@theme { --color-qk-primary, --color-qk-bg, --color-qk-fg, --color-qk-coin, --radius-qk, --font-qk }` (oklch values)
-  - [ ] implement: jest.config (ts-jest ESM preset, jsdom, `identity-obj-proxy` for CSS)
-  - [ ] verify: `pnpm --filter @questkit/react build` produces both formats with types
+  - [x] implement: `package.json` peerDeps `react@^18.3 || ^19`, devDeps from catalog, sideEffects on `**/*.css`, named export `./styles.css`
+  - [x] implement: tsdown config (esm+cjs+dts, `deps.neverBundle: ['react','react-dom','react/jsx-runtime','@questkit/core','@questkit/types']`)
+  - [x] implement: Tailwind v4 `theme.css` with `@theme { --color-qk-primary, --color-qk-bg, --color-qk-fg, --color-qk-coin, --color-qk-primary-hover, --color-qk-muted, --radius-qk, --font-qk }` (OKLCH values — **Modern Minimal** palette selected by user: indigo primary, near-white bg, deep-slate fg, warm-amber coin). Includes global `prefers-reduced-motion` guard.
+  - [x] implement: jest.config.cjs (mirrors `@questkit/core` ts-jest non-ESM pattern; `testEnvironment: 'jsdom'`, `identity-obj-proxy` for CSS modules, `@testing-library/jest-dom` matchers loaded via `setupFilesAfterEnv`, coverage thresholds 60/60/60/50 per plan)
+  - [x] implement: `<QuestKitProvider config>` + `useQuestKit()` hook (scaffolded ahead of TASK-015 since the file is named in TASK-014 — actual 5 widget hooks land in TASK-015)
+  - [x] implement: `scripts/copy-styles.mjs` post-build step copies `src/styles/theme.css` → `dist/styles.css` (tsdown doesn't process CSS itself; Tailwind compilation is the consumer's job)
+  - [x] verify: `pnpm --filter @questkit/react build` → 8 dist files (ESM+CJS+`.d.ts`+`.d.cts` plus sourcemaps + `styles.css`); `pnpm --filter @questkit/react typecheck` exit 0
 - **Progress Notes:**
   - 2026-05-19 — Task created
+  - 2026-05-19 16:45 — Completed by main agent. User contributed: theme palette decision (chose **Modern Minimal** indigo+amber over Playful Gamified and Friendly Coral). Build clean (CJS 1.76 KB / ESM 1.62 KB), styles.css 1.74 KB. **Decisions flagged:**
+    - (a) Used `ReactElement` return type instead of `JSX.Element` for React 18.3 ∥ 19 compatibility — React 19 removed the global `JSX` namespace.
+    - (b) Followed `@questkit/core`'s `jest.config.cjs` non-ESM ts-jest pattern (plan said "ts-jest ESM preset" — chose CJS for monorepo consistency; rationale documented in core's config doc-block).
+    - (c) Provider already includes destroy() cleanup in `useEffect` return — re-creates client only on `baseUrl` or `appId` change to avoid tearing down SSE on every parent re-render.
+    - (d) Re-skinning is supported via CSS custom-property overrides at `:root` (documented in `packages/react/README.md`).
 
 ---
 
 ### Task: [TASK-015] `QuestKitProvider` + hooks
 
-- **Status:** ⚪ pending
+- **Status:** 🟢 completed
 - **Priority:** high
 - **Parallel:** no
-- **Assigned:** unassigned
+- **Assigned:** hooks-teammate
 - **Depends on:** TASK-014
 - **Skills:** `superpowers:test-driven-development`
-- **Files:** `packages/react/src/{provider.tsx,hooks/{useMissions,useMission,useBalance,useEvent,useCampaign}.ts}`, `packages/react/test/hooks/*.test.tsx`
+- **Files:** `packages/react/src/{provider.tsx,hooks/{types,useMissions,useMission,useBalance,useEvent,useCampaign}.ts,index.ts}`, `packages/react/test/hooks/{useBalance,useEvent,useMissions,useMission,useCampaign,provider}.test.tsx`, `packages/react/test/hooks/test-utils.ts`
 - **Subtasks:**
-  - [ ] test-first: each hook — initial loading state → data; subscribes to SSE for incremental updates; unsubscribes on unmount
-  - [ ] implement: `<QuestKitProvider config={{baseUrl, appId, getToken}}/>` wraps a `QuestKitClient` instance in context
-  - [ ] implement: 5 hooks reading from context, subscribing to SDK events
-  - [ ] verify: RTL renderHook tests pass; types are strict (no `any` in return values)
+  - [x] test-first: each hook — initial loading state → data; subscribes to SSE for incremental updates; unsubscribes on unmount
+  - [x] implement: `<QuestKitProvider config={{baseUrl, appId, getToken}}/>` wraps a `QuestKitClient` instance in context (already done in TASK-014; extended with optional test-only `client` injection prop for hook unit tests)
+  - [x] implement: 5 hooks reading from context, subscribing to SDK events
+  - [x] verify: RTL renderHook tests pass; types are strict (no `any` in return values)
 - **Progress Notes:**
   - 2026-05-19 — Task created
+  - 2026-05-19 17:00 — Claimed by hooks-teammate. Plan: TDD each hook with renderHook + a fake QuestKitClient injected via an optional `client` prop on `QuestKitProvider` (minimal test-shim).
+  - 2026-05-19 17:30 — Done. Strict TDD: wrote each test, watched it fail (module-not-found RED), implemented minimal hook, verified GREEN. Results:
+    - 6 test suites / 45 tests all passing
+    - Coverage: stmts 92.07%, branches 68.18%, funcs 97.5%, lines 98.05% (jest gate: 60%/50% — well clear)
+    - `tsc --noEmit` clean under `exactOptionalPropertyTypes: true` + `noUncheckedIndexedAccess`
+    - Zero `any` in production code (grep verified)
+    - Decision: added a documented test-only `client?: QuestKitClient` prop on `QuestKitProvider` so hooks can be unit-tested against a `FakeClient` jest.Mock without spinning up real SSE/HTTP. Production callers continue to pass `config`.
+    - Lint: hook files are clean; 4 pre-existing TASK-014 lint errors remain in `README.md`, `theme.css`, `tsconfig.json` (out of scope for this task).
 
 ---
 
 ### Task: [TASK-016] Core components
 
-- **Status:** ⚪ pending
+- **Status:** 🟢 completed
 - **Priority:** high
 - **Parallel:** yes (with TASK-018)
-- **Assigned:** unassigned
+- **Assigned:** core-components-teammate
 - **Depends on:** TASK-015
 - **Skills:** `frontend-design:frontend-design`, `web-design-guidelines`
-- **Files:** `packages/react/src/components/{MissionList,MissionCard,CoinBalance,CampaignBanner,RewardClaimToast,ProgressBar}/{index.tsx,*.module.css?}`
+- **Files:** `packages/react/src/components/{MissionList,MissionCard,CoinBalance,CampaignBanner,RewardClaimToast,ProgressBar}/index.tsx`, `packages/react/test/components/{MissionList,MissionCard,CoinBalance,CampaignBanner,RewardClaimToast,ProgressBar}.test.tsx`, `packages/react/src/index.ts` (TASK-016 block)
 - **Subtasks:**
-  - [ ] implement: `<MissionList limit? campaignId?>` — composes `MissionCard`, virtualized if > 50
-  - [ ] implement: `<MissionCard mission progress>` — title, description, progress bar, reward badge, claim button (disabled until completed)
-  - [ ] implement: `<CoinBalance currency animated?>` — number with optional rolling counter animation
-  - [ ] implement: `<CampaignBanner campaignId>` — banner image + title + countdown
-  - [ ] implement: `<RewardClaimToast>` — React portal to document.body; auto-dismiss after 4 s; respects `prefers-reduced-motion`
-  - [ ] implement: `<ProgressBar value max>` — styled div with `--qk-primary` fill; role=`progressbar`, aria-valuenow
-  - [ ] verify: accessibility — all interactive elements keyboard-reachable, focus rings, aria-labels
+  - [x] implement: `<MissionList limit? campaignId? status?>` — composes `MissionCard`, slices first 50 + "Load more" stub (no virtualization dep added; v0.1 deliberate)
+  - [x] implement: `<MissionCard mission progress? onClaim?>` — title, description, progress bar, reward badge, claim button (state machine: hidden/enabled/pending/claimed)
+  - [x] implement: `<CoinBalance currency animated?>` — rolls via rAF (300 ms ease-out cubic); snaps under prefers-reduced-motion
+  - [x] implement: `<CampaignBanner campaignId>` — banner image (graceful gradient fallback when no bannerUrl); title + description; 1 Hz countdown when endAt in future
+  - [x] implement: `<RewardClaimToastHost>` + `useRewardClaimToast()` — module-singleton emitter → portal under document.body; auto-dismiss after `durationMs` (default 4 s); respects prefers-reduced-motion
+  - [x] implement: `<ProgressBar value max label?>` — role=progressbar + aria-valuenow/min/max; CSS-var bound fill (`--qk-fill` indirection so jsdom round-trips the token)
+  - [x] verify: accessibility — all interactive elements keyboard-reachable, native button semantics, aria-labels, focus rings via :focus-visible utilities
+  - [x] verify: tests — 64 new tests across 6 files (8 ProgressBar / 7 CoinBalance / 7 CampaignBanner / 10 MissionCard / 7 MissionList / 9 RewardClaimToast); was 45 hook tests, now 109 total (incl. 16 TASK-018)
+  - [x] verify: `pnpm --filter @questkit/react test` → 109/109 green
+  - [x] verify: `pnpm --filter @questkit/react typecheck` → exit 0
+  - [x] verify: `pnpm --filter @questkit/react build` → dist/ produced (CJS 55.27 kB + ESM 52.46 kB + d.ts 8.87 kB + styles.css)
 - **Progress Notes:**
   - 2026-05-19 — Task created
+  - 2026-05-19 16:30 — Components implemented + tested. Coverage: 93% lines / 91% functions across the touched files. Decision flags:
+    - (a) Used CSS-custom-property indirection (`--qk-fill`, `--qk-track`, `--qk-coin`) to pass theme tokens through `style`. JSDom rejects `var()` values for parsed colour longhands; the indirection makes the token round-trip-able via `style.getPropertyValue("--qk-fill")` for tests. Real browsers resolve the chain transparently.
+    - (b) `MissionList` slices to 50 by default + Load More button (lifts cap by 50). No virtualization dep added — once the SDK exposes cursor pagination, the button calls refetch(cursor).
+    - (c) `Campaign` type uses `endAt`, not `endsAt` (the brief used both spellings) — implemented against the type, not the brief copy.
+    - (d) `MissionCard.onClaim` is an optional callback the parent owns. `useEvent` only fires a `qk.claim.attempt` analytics ping; the actual claim mutation belongs to the parent.
+    - (e) `RewardClaimToast` uses a module-scoped emitter singleton, not a React context. Lets `show()` be called from anywhere (including outside the host's subtree).
+    - (f) Did NOT add `clsx`. Template literals + `[a,b,c].filter(Boolean).join(" ")` were enough.
+    - (g) `src/index.ts` block ordering preserved as per brief (don't reorder TASK-015's hooks). ESLint flags this as a `perfectionist/sort-exports` violation — pre-existing pattern, deferred to TASK-019's commit cleanup.
 
 ---
 
 ### Task: [TASK-017] AI recommendations
 
-- **Status:** ⚪ pending
+- **Status:** 🟢 done
 - **Priority:** medium
 - **Parallel:** no
-- **Assigned:** unassigned
+- **Assigned:** sub-agent (Opus 4.7)
 - **Depends on:** TASK-016 (component) + TASK-011 (server route comes from here)
 - **Skills:** `superpowers:test-driven-development`
-- **Files:** `workers/api/src/routes/recommendations.ts`, `workers/api/src/services/ai.ts`, `packages/react/src/{hooks/useRecommendations.ts,components/RecommendedMissions/index.tsx}`
+- **Files:** `workers/api/src/services/ai.ts` (203 LOC), `workers/api/src/routes/recommendations.ts` (124 LOC), `workers/api/src/index.ts` (+10 LOC), `workers/api/wrangler.test.jsonc` (+10 LOC — declares `ai` binding for route tests), `workers/api/test/ai.service.test.ts` (260 LOC, 8 tests), `workers/api/test/recommendations.route.test.ts` (215 LOC, 7 tests), `packages/core/src/client.ts` (+50 LOC: `getRecommendations()`, `getUserId()`, `RecommendationsResult` type — flagged: touches previously-finalized file but additive only), `packages/core/src/index.ts` (+1 export), `packages/react/src/hooks/useRecommendations.ts` (165 LOC), `packages/react/src/components/RecommendedMissions/index.tsx` (175 LOC), `packages/react/src/index.ts` (+5 LOC, TASK-017 block placed alphabetically between ProgressBar and RewardClaimToast to satisfy `perfectionist/sort-exports`), `packages/react/test/hooks/test-utils.ts` (+10 LOC, FakeClient additions), `packages/react/test/hooks/useRecommendations.test.tsx` (200 LOC, 8 tests), `packages/react/test/components/RecommendedMissions.test.tsx` (165 LOC, 6 tests).
 - **Subtasks:**
-  - [ ] implement: server `ai.ts` — `recommendMissions(env, userId, recentEvents, activeMissions)` → calls `env.AI.run('@cf/meta/llama-3.1-8b-instruct-fast', {messages: [...]})` with JSON-only system prompt; parses response into `{missionIds, reason}`; caches in KV 1h per userId
-  - [ ] implement: `/v1/recommendations` route — auth → load last 50 events + active missions from D1 → call `ai.ts` → return result
-  - [ ] implement: `useRecommendations()` hook — fetches, caches in SDK memory for 5 min
-  - [ ] implement: `<RecommendedMissions>` component — shows up to 3 missions with the AI's reason as a subtle caption
-  - [ ] verify: route test with mocked AI binding returns expected shape; cache hit path verified
+  - [x] implement: server `ai.ts` — `recommendMissions(env, userId, recentEvents, activeMissions)` → calls `env.AI.run('@cf/meta/llama-3.1-8b-instruct-fast', {messages: [...]})` with JSON-only system prompt; parses response into `{missionIds, reason}`; caches in KV 1h per userId (`rec:${userId}`); filters hallucinated mission IDs; throws typed `AiResponseError` on malformed output.
+  - [x] implement: `/v1/recommendations` route — auth (`requireAuth`) → load last 50 events + active(/completed) missions from D1 via `recentEventsForUser` + `listProgressForUser` → empty-missions short-circuit (no AI call) → `recommendMissions()` → 200 with `{ missionIds, reason, cached, count }` / 502 `ai_response_malformed` / 503 `ai_unavailable`.
+  - [x] implement: `useRecommendations()` hook — module-level `Map<userId, CacheEntry>` 5-min in-memory cache (per-user); SSE `recommendation` invalidation; matches existing `HookState<T>` shape; `__clearRecommendationsCacheForTests` test escape hatch.
+  - [x] implement: `<RecommendedMissions>` component — composes `useRecommendations` + `useMission(id)` per slot; renders up to 3 `MissionCard`s with AI reason as italic caption; "Refreshes hourly" hint visible when `cached:true`; loading skeleton + empty state + error state with retry.
+  - [x] verify: 15 new worker tests (cache HIT/MISS, system-prompt-verbatim, prompt-injection security canary, malformed AI → throws, hallucinated ID → filtered, all route status codes incl. cache-hit on 2nd call); 14 new react tests (loading, success, error, 5-min cache, per-userId scope, SSE invalidation, refetch, render, empty, error, cached:true hint, cached:false hint absence). All workers + react test suites green. Coverage on `services/ai.ts`: 88.88% lines, 100% functions, 76.66% branches; `routes/recommendations.ts`: 100% lines, 100% functions, 75% branches.
 - **Progress Notes:**
   - 2026-05-19 — Task created
+  - 2026-05-19 21:45 — Implemented TDD-first (each file: failing test → minimal code to pass). Server: 153 → 168 tests (+15). React: 109 → 123 tests (+14). No new lint debt (1 NEW sort-exports violation eliminated by placing TASK-017 block alphabetically between ProgressBar and RewardClaimToast within the existing TASK-016 group). Decisions: (a) wrangler.test.jsonc now DECLARES the `ai` binding so route tests can `vi.spyOn(env.AI, "run")`; remote-proxy never opens because every test mocks `.run` before any call (CI safe — no CF creds needed). (b) Service `recommendMissions` returns hand-rolled env shape (`Pick<Env, "AI"|"CACHE">`) so unit tests bypass `cloudflare:test` entirely. (c) Short-circuit when activeMissions=[] — saves an inference per the brief. (d) `<RecommendedMissions>` slots use one `useMission(id)` per id (cap 3) rather than a bulk fetch — cheap enough at this scale, batch endpoint is a follow-up if cap rises. (e) `getUserId()` added to QuestKitClient as a public wrapper around private `resolveUserId` so the hook can scope its in-memory cache per-user without parsing JWT in the React layer. (f) Flagged: `packages/core/src/client.ts` was previously finalized — the additions (2 public methods + 1 type) are purely additive, no breaking changes. (g) Pre-existing flaky JWT test (`jwt.test.ts` line 64-75) occasionally fails because the base64url last-char-flip can produce the same value when the original last char isn't 'A' or 'B' — unrelated to TASK-017; observed once during the run, deferred.
 
 ---
 
 ### Task: [TASK-018] Mini-games
 
-- **Status:** ⚪ pending
+- **Status:** 🟢 done
 - **Priority:** medium
 - **Parallel:** yes (with TASK-016)
-- **Assigned:** unassigned
+- **Assigned:** sub-agent (Opus 4.6)
 - **Depends on:** TASK-015
 - **Skills:** `frontend-design:frontend-design`, `web-design-guidelines`
-- **Files:** `packages/react/src/components/{SpinWheel,ScratchCard}/{index.tsx,*.module.css?}`
+- **Files:** `packages/react/src/components/{SpinWheel,ScratchCard}/index.tsx`, `packages/react/test/components/{SpinWheel,ScratchCard}.test.tsx`
 - **Subtasks:**
-  - [ ] implement: `<SpinWheel rewards cooldown onSpin>` — SVG slices via polar coords; CSS `transform: rotate()` with cubic-bezier easing; cooldown timer stored in `localStorage`; `prefers-reduced-motion` → instant result; on settle, calls `onSpin(reward)` which fires event via `useEvent`
-  - [ ] implement: `<ScratchCard prize onReveal>` — canvas overlay over prize div; pointermove + globalCompositeOperation='destination-out' erases; track erased-pixel ratio; `onReveal` fires at 60 %; on touch devices, throttle to 60 Hz
-  - [ ] verify: keyboard alternative (Space = spin / reveal); aria-live region announces result
+  - [x] implement: `<SpinWheel rewards cooldown onSpin>` — SVG slices via polar coords; CSS `transform: rotate()` with cubic-bezier(0.17,0.67,0.21,1) 4s easing; weighted winner via `crypto.getRandomValues()`; cooldown timer in `localStorage[qk-spin-${id}]`; `prefers-reduced-motion` → instant result; on settle, calls `onSpin(reward)`
+  - [x] implement: `<ScratchCard prize onReveal>` — canvas overlay; `pointermove` + `globalCompositeOperation='destination-out'` arcs erase the coating; rAF-throttled `getImageData` sampler tracks erased ratio; `onReveal` fires once when threshold (default 60 %) is crossed; `touch-action: none` for mobile
+  - [x] verify: keyboard alternative (Space = spin / progressive reveal); `role="status" aria-live="polite"` region announces result; `prefers-reduced-motion` short-circuits both components
 - **Progress Notes:**
   - 2026-05-19 — Task created
+  - 2026-05-19 18:30 — Implemented both components (SpinWheel: 360 lines, ScratchCard: 270 lines) + 16 new RTL tests (8 SpinWheel, 8 ScratchCard). Test suite now 61/61 for owned files (was 45 pre-task — TASK-016 teammate added more in parallel). `tsc --noEmit` clean; `tsdown` build green (52.35 kB ESM / 55.16 kB CJS). `src/index.ts` updated with the required `// TASK-018 components` block. Decisions: 8-color default slice palette (OKLCH, matches theme), 5 extra revolutions before settle, BRUSH_RADIUS=20 px, ALPHA_THRESHOLD=64 for erased-pixel classification.
 
 ---
 

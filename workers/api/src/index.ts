@@ -17,6 +17,7 @@ import balanceRouter from "./routes/balance";
 import campaignsRouter from "./routes/campaigns";
 import eventsRouter from "./routes/events";
 import missionsRouter from "./routes/missions";
+import recommendationsRouter from "./routes/recommendations";
 import sseRouter from "./routes/sse";
 
 const app = new Hono<{ Bindings: Env }>();
@@ -61,6 +62,13 @@ app.route("/v1/events", eventsRouter);
  * /v1/missions — mission read + atomic claim (TASK-010). JWT-protected.
  */
 app.route("/v1/missions", missionsRouter);
+
+/**
+ * /v1/recommendations — AI-powered mission recommendations (TASK-017).
+ * JWT-protected. Backed by Workers AI (`@cf/meta/llama-3.1-8b-instruct-fast`)
+ * with KV-cached results (1h TTL per user).
+ */
+app.route("/v1/recommendations", recommendationsRouter);
 
 /**
  * /v1/sse — live SDKUpdate fanout (TASK-011). JWT-protected. The /updates

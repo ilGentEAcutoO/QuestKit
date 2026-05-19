@@ -1,15 +1,16 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  // Test-only wrangler config — identical to wrangler.jsonc EXCEPT the `ai`
-  // binding is omitted. Workers AI has no local emulator; pool-workers 0.16
-  // tries to open a remote-proxy session against the real Cloudflare API,
-  // which fails in CI without CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_API_TOKEN
-  // secrets. Until TASK-017 lands AI recommendations, no test depends on
-  // env.AI — dropping the binding here is the cleanest workaround.
+  // Test-only wrangler config — mirrors wrangler.jsonc. The `ai` binding IS
+  // declared here so route tests can patch `env.AI.run` via `vi.spyOn` and
+  // hit the real route surface (TASK-017). Workers AI has no local emulator;
+  // pool-workers 0.16 opens a remote-proxy session lazily — that only fails
+  // if a test actually invokes `env.AI.run` without first mocking it. Every
+  // AI-touching test under `test/` MUST mock the binding before exercising
+  // the route. See `test/recommendations.route.test.ts` for the pattern.
   //
-  // When TASK-017 ships, either (a) add CF credentials to CI and bring the
-  // binding back here, or (b) gate the AI-using tests with a `describe.skipIf`
-  // that checks for credential presence.
+  // Service-layer ai.ts tests bypass `env.AI` entirely (they construct a
+  // hand-rolled env). Only route tests use the real binding shape with a
+  // patched .run method.
   "name": "questkit-worker-api",
   "main": "src/index.ts",
   "compatibility_date": "2026-05-19",
@@ -65,6 +66,16 @@
       "binding": "EVENTS_AE",
       "dataset": "questkit_events"
     }
-  ]
-  // NOTE: no `ai` binding here — see header comment.
+  ],
+
+  // Workers AI — declared so route tests can patch `env.AI.run` via
+  // `vi.spyOn`. Tests MUST mock `.run` before invoking the route — without
+  // a mock the call would hit Cloudflare's real inference API (and CI has
+  // no credentials, so it would fail). Pool-workers prints a one-per-file
+  // "may incur usage charges" warning at start-up; that's harmless because
+  // every AI-touching test mocks before invoking. `remote: true` is
+  // intentionally omitted — adding it makes pool-workers try to open a
+  // remote-proxy session at start-up which fails in CI without
+  // CLOUDFLARE_API_TOKEN.
+  "ai": { "binding": "AI" }
 }

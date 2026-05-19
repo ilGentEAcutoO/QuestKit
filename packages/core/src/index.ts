@@ -21,5 +21,6 @@ export type {
   MissionsListOpts,
   MissionsListResponse,
   QuestKitConfig,
+  RecommendationsResult,
 } from "./client";
 export { QuestKitError } from "./errors";

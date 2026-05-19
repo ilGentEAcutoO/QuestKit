@@ -101,6 +101,19 @@ export interface CampaignDetail {
   missions?: Mission[];
 }
 
+/**
+ * Result shape returned by `getRecommendations()` — mirrors the
+ * `/v1/recommendations` route response. `cached` indicates the response was
+ * served from the server-side KV cache (no AI inference); `count` is the
+ * length of `missionIds` after hallucination filtering.
+ */
+export interface RecommendationsResult {
+  missionIds: string[];
+  reason: string;
+  cached: boolean;
+  count: number;
+}
+
 interface MintTokenInput {
   appSecret: string;
   userId: string;
@@ -441,6 +454,47 @@ export class QuestKitClient {
     );
     if (!resp.ok) throw await this.errorFromResponse(resp);
     return (await resp.json()) as CampaignDetail;
+  }
+
+  // ============================================================
+  // Recommendations (TASK-017)
+  // ============================================================
+
+  /**
+   * Fetch AI-recommended missions for the current user. The server caches
+   * results per-user in KV for 1 hour (`cached: true` on hits). The hook
+   * `useRecommendations` adds an additional 5-minute in-memory cache to
+   * avoid hammering the endpoint when multiple `<RecommendedMissions>`
+   * mount in the same render pass.
+   *
+   * GET /v1/recommendations
+   *   200: { missionIds, reason, cached, count }
+   *   502: { error: "ai_response_malformed" } — LLM returned non-JSON
+   *   503: { error: "ai_unavailable" }       — AI binding outage
+   */
+  async getRecommendations(): Promise<RecommendationsResult> {
+    this.ensureAlive();
+    const resp = await this.authedFetch("/v1/recommendations", {
+      method: "GET",
+    });
+    if (!resp.ok) throw await this.errorFromResponse(resp);
+    return (await resp.json()) as RecommendationsResult;
+  }
+
+  /**
+   * Public accessor for the current userId derived from the JWT's `sub`
+   * claim. Exposed (TASK-017) so the React `useRecommendations` hook can
+   * scope its in-memory cache per-user — without this, a multi-user host
+   * app would mix recommendations across users. Internally delegates to
+   * `resolveUserId` which is otherwise private.
+   *
+   * Returns the same value `fireEvent`'s body field uses; safe to call
+   * repeatedly (no caching here — `getToken()` is the caller's caching
+   * surface).
+   */
+  async getUserId(): Promise<string> {
+    this.ensureAlive();
+    return this.resolveUserId();
   }
 
   // ============================================================

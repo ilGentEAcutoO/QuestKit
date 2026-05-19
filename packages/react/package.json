@@ -2,14 +2,83 @@
   "name": "@questkit/react",
   "type": "module",
   "version": "0.1.0",
-  "description": "QuestKit React component library and hooks (placeholder — populated in TASK-014).",
+  "description": "QuestKit React component library and hooks — providers, gamification widgets, mini-games.",
   "license": "MIT",
-  "publishConfig": {
-    "access": "public"
-  },
+  "homepage": "https://github.com/ilGentEAcutoO/QuestKit/tree/main/packages/react#readme",
   "repository": {
     "type": "git",
     "url": "https://github.com/ilGentEAcutoO/QuestKit.git",
     "directory": "packages/react"
+  },
+  "bugs": {
+    "url": "https://github.com/ilGentEAcutoO/QuestKit/issues"
+  },
+  "keywords": [
+    "questkit",
+    "gamification",
+    "react",
+    "hooks",
+    "cloudflare"
+  ],
+  "sideEffects": [
+    "**/*.css"
+  ],
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./styles.css": "./dist/styles.css",
+    "./package.json": "./package.json"
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsdown && node scripts/copy-styles.mjs",
+    "dev": "tsdown --watch",
+    "test": "jest",
+    "test:coverage": "jest --coverage",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "clean": "rimraf dist .turbo coverage"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "peerDependencies": {
+    "react": "^18.3.0 || ^19.0.0",
+    "react-dom": "^18.3.0 || ^19.0.0"
+  },
+  "dependencies": {
+    "@questkit/core": "workspace:^",
+    "@questkit/types": "workspace:^"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "catalog:",
+    "@testing-library/react": "catalog:",
+    "@testing-library/user-event": "catalog:",
+    "@types/jest": "catalog:",
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "identity-obj-proxy": "catalog:",
+    "jest": "catalog:",
+    "jest-environment-jsdom": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "rimraf": "^6.0.1",
+    "ts-jest": "catalog:",
+    "tsdown": "catalog:",
+    "typescript": "catalog:"
   }
 }
