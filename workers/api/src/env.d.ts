@@ -26,4 +26,16 @@ declare global {
     /** App-level shared secret required by /v1/auth/token to mint user tokens. Set via `wrangler secret put APP_SECRET`. */
     APP_SECRET: string;
   }
+
+  // The pool-workers `cloudflare:test` module types `env` as `Cloudflare.Env`.
+  // Mirror the secret augmentation onto that namespace so test files can read
+  // `env.JWT_SECRET` without a cast.
+  namespace Cloudflare {
+    interface Env {
+      GIT_SHA?: string;
+      JWT_SECRET: string;
+      WEBHOOK_HMAC_SECRET: string;
+      APP_SECRET: string;
+    }
+  }
 }

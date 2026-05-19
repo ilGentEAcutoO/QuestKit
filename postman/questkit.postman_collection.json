@@ -1,0 +1,765 @@
+{
+  "info": {
+    "name": "QuestKit API",
+    "description": "Contract specification for the QuestKit gamification API (workers/api/src/routes/*). Each request mirrors what the matching vitest route test asserts — but exercised against the deployed worker rather than miniflare. Run with Newman in CI; see postman/newman-ci.sh. Per-run user_id is generated as `newman_<unix-ms>` on collection start so reruns never collide with prior state.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_postman_id": "qk-v1-collection",
+    "version": "0.1.0"
+  },
+  "variable": [
+    { "key": "base_url", "value": "{{base_url}}" },
+    { "key": "app_id", "value": "{{app_id}}" },
+    { "key": "app_secret", "value": "{{app_secret}}" },
+    { "key": "user_id", "value": "{{user_id}}" },
+    { "key": "token", "value": "" },
+    { "key": "idem_event_id", "value": "" },
+    { "key": "idem_key", "value": "" },
+    { "key": "first_mission_id", "value": "" },
+    { "key": "sse_status", "value": "" },
+    { "key": "sse_content_type", "value": "" }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// ---------------------------------------------------------------",
+          "// Collection-level pre-request.",
+          "// 1. On the FIRST request of the run, replace the env-provided",
+          "//    user_id with a fresh `newman_<unix-ms>` so reruns never collide",
+          "//    on already-claimed missions / minted balances.",
+          "// 2. Lazily mint a JWT and store it in the `token` collection",
+          "//    variable. Skipped for the mint request itself (it IS the mint).",
+          "// ---------------------------------------------------------------",
+          "if (!pm.collectionVariables.get('user_id_bootstrapped')) {",
+          "  pm.collectionVariables.set('user_id', 'newman_' + Date.now());",
+          "  pm.collectionVariables.set('user_id_bootstrapped', '1');",
+          "  console.log('[questkit] bootstrapped user_id =', pm.collectionVariables.get('user_id'));",
+          "}",
+          "",
+          "if (pm.info.requestName === 'Mint token (POST /v1/auth/token)') return;",
+          "if (pm.collectionVariables.get('token')) return;",
+          "",
+          "const baseUrl = pm.collectionVariables.get('base_url');",
+          "const appId = pm.collectionVariables.get('app_id');",
+          "const appSecret = pm.collectionVariables.get('app_secret');",
+          "const userId = pm.collectionVariables.get('user_id');",
+          "pm.sendRequest({",
+          "  url: `${baseUrl}/v1/auth/token`,",
+          "  method: 'POST',",
+          "  header: { 'content-type': 'application/json' },",
+          "  body: { mode: 'raw', raw: JSON.stringify({ appId: appId, appSecret: appSecret, userId: userId }) }",
+          "}, (err, res) => {",
+          "  if (err || res.code !== 200) { console.error('[questkit] token mint failed', err, res && res.code); return; }",
+          "  pm.collectionVariables.set('token', res.json().token);",
+          "});"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "description": "JWT minting via POST /v1/auth/token. Other requests rely on the token this folder produces (or the collection-level pre-request auto-mints it lazily).",
+      "item": [
+        {
+          "name": "Mint token (POST /v1/auth/token)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "content-type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/v1/auth/token",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "auth", "token"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"appId\": \"{{app_id}}\",\n  \"appSecret\": \"{{app_secret}}\",\n  \"userId\": \"{{user_id}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('has token + expiresAt with ~1h ttl', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.token).to.be.a('string');",
+                  "  pm.expect(j.token.split('.')).to.have.lengthOf(3);",
+                  "  pm.expect(j.expiresAt).to.be.a('number');",
+                  "  const ttl = j.expiresAt - Date.now();",
+                  "  pm.expect(ttl, 'expiresAt ttl').to.be.within(3590e3, 3601e3);",
+                  "});",
+                  "pm.collectionVariables.set('token', pm.response.json().token);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Events",
+      "description": "Event ingestion via POST /v1/events. Idempotency-Key header replay path is exercised by the second + third requests. The 4th asserts the 400 validation path.",
+      "item": [
+        {
+          "name": "Fire event (POST /v1/events)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "content-type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/v1/events",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "events"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"{{user_id}}\",\n  \"name\": \"purchase.completed\",\n  \"payload\": { \"category\": \"electronics\", \"amount\": 75 },\n  \"timestamp\": {{$timestamp}}\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// $timestamp is the Postman dynamic seconds-since-epoch; the API",
+                  "// expects ms. Replace via local var so the body templating gets ms.",
+                  "// (We do this in-body via Date.now() instead.)",
+                  "pm.variables.set('$timestamp', Date.now());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('body has accepted, eventId, missionsUpdated[]', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.accepted).to.equal(true);",
+                  "  pm.expect(j.eventId).to.be.a('string');",
+                  "  pm.expect(j.missionsUpdated).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Fire event with idempotency key (POST /v1/events)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "content-type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{idem_key}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/events",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "events"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"{{user_id}}\",\n  \"name\": \"app.heartbeat\",\n  \"payload\": { \"source\": \"newman-idem\" },\n  \"timestamp\": {{$timestamp}}\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Mint a fresh idempotency key per run so we don't collide with",
+                  "// the persisted KV cache from a prior Newman run.",
+                  "if (!pm.collectionVariables.get('idem_key')) {",
+                  "  pm.collectionVariables.set('idem_key', 'newman_idem_' + Date.now());",
+                  "}",
+                  "pm.variables.set('$timestamp', Date.now());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('eventId captured', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.eventId).to.be.a('string');",
+                  "  pm.collectionVariables.set('idem_event_id', j.eventId);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Fire event replay (POST /v1/events)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "content-type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{idem_key}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/events",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "events"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"{{user_id}}\",\n  \"name\": \"app.heartbeat\",\n  \"payload\": { \"source\": \"newman-idem\" },\n  \"timestamp\": {{$timestamp}}\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.variables.set('$timestamp', Date.now());"]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK on replay', () => pm.response.to.have.status(200));",
+                  "pm.test('replay header is hit (or db-hit if KV evicted)', () => {",
+                  "  const v = pm.response.headers.get('X-Idempotent-Replay') || pm.response.headers.get('x-idempotent-replay');",
+                  "  pm.expect(v, 'X-Idempotent-Replay header').to.be.oneOf(['hit', 'db-hit']);",
+                  "});",
+                  "pm.test('eventId matches the original idempotent write', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.eventId).to.equal(pm.collectionVariables.get('idem_event_id'));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Fire event invalid body (POST /v1/events)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "content-type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/v1/events",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "events"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"{{user_id}}\",\n  \"payload\": { \"missing\": \"name\" },\n  \"timestamp\": {{$timestamp}}\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.variables.set('$timestamp', Date.now());"]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 invalid_event when name is missing', () => pm.response.to.have.status(400));",
+                  "pm.test('body.error === invalid_event', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.error).to.equal('invalid_event');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Missions",
+      "description": "Mission read + claim. The Claim request pre-fires three purchase.completed events with category:books so M1 (\"Triple Treat\" — 3 purchases today) is in `completed` state before the claim attempt.",
+      "item": [
+        {
+          "name": "List missions (GET /v1/missions)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/missions",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "missions"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('missions[] length 6 + progress is object', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.missions).to.be.an('array');",
+                  "  pm.expect(j.missions.length, 'seed mission count').to.equal(6);",
+                  "  pm.expect(j.progress).to.be.an('object');",
+                  "  pm.collectionVariables.set('first_mission_id', j.missions[0].id);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List missions by status (GET /v1/missions?status=active)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/missions?status=active",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "missions"],
+              "query": [{ "key": "status", "value": "active" }]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('returned missions all have an active progress row', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.missions).to.be.an('array');",
+                  "  for (const m of j.missions) {",
+                  "    pm.expect(j.progress[m.id], 'progress for ' + m.id).to.not.be.undefined;",
+                  "    pm.expect(j.progress[m.id].status, 'progress.status for ' + m.id).to.equal('active');",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get single mission (GET /v1/missions/:id)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/missions/{{first_mission_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "missions", "{{first_mission_id}}"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('mission.id matches first_mission_id', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.mission).to.be.an('object');",
+                  "  pm.expect(j.mission.id).to.equal(pm.collectionVariables.get('first_mission_id'));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get non-existent mission (GET /v1/missions/nonexistent_id)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/missions/nonexistent_id",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "missions", "nonexistent_id"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404 Not Found', () => pm.response.to.have.status(404));",
+                  "pm.test('error === mission_not_found', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.error).to.equal('mission_not_found');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Claim mission (POST /v1/missions/mis_ecom_daily_purchase_3/claim)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "content-type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/v1/missions/mis_ecom_daily_purchase_3/claim",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "missions", "mis_ecom_daily_purchase_3", "claim"]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Pre-fire 3 purchase.completed events with category:books so M1",
+                  "// (\"Triple Treat\" — 3 purchases today, no filter) completes and",
+                  "// becomes claimable. Each event uses a unique idempotency key so",
+                  "// they're all counted (no replay short-circuit).",
+                  "const baseUrl = pm.collectionVariables.get('base_url');",
+                  "const userId = pm.collectionVariables.get('user_id');",
+                  "const token = pm.collectionVariables.get('token');",
+                  "if (!token) { console.warn('[claim-prefire] no token yet; collection prereq should have minted one'); return; }",
+                  "",
+                  "const fire = (i) => new Promise((resolve) => {",
+                  "  pm.sendRequest({",
+                  "    url: `${baseUrl}/v1/events`,",
+                  "    method: 'POST',",
+                  "    header: {",
+                  "      'content-type': 'application/json',",
+                  "      'authorization': `Bearer ${token}`,",
+                  "      'idempotency-key': `claim_prefire_${Date.now()}_${i}`",
+                  "    },",
+                  "    body: { mode: 'raw', raw: JSON.stringify({",
+                  "      userId: userId,",
+                  "      name: 'purchase.completed',",
+                  "      payload: { amount: 10, category: 'books' },",
+                  "      timestamp: Date.now()",
+                  "    }) }",
+                  "  }, (err, res) => {",
+                  "    if (err) console.error('[claim-prefire] fire ' + i + ' err', err);",
+                  "    else if (res.code !== 200) console.warn('[claim-prefire] fire ' + i + ' status', res.code);",
+                  "    resolve();",
+                  "  });",
+                  "});",
+                  "",
+                  "// Sequential — workerd may serialise but we want deterministic count.",
+                  "(async () => { await fire(1); await fire(2); await fire(3); })();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The pre-request fires 3 purchase.completed events to complete M1,",
+                  "// then this claim should succeed and mint +100 coin. The claim helper",
+                  "// is idempotent server-side; reruns on the same user_id replay OK.",
+                  "// (We mint a fresh user_id per run so the first claim always wins.)",
+                  "pm.test('200 OK on claim', () => pm.response.to.have.status(200));",
+                  "pm.test('progress.status === claimed', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.progress).to.be.an('object');",
+                  "  pm.expect(j.progress.status).to.equal('claimed');",
+                  "});",
+                  "pm.test('reward === { kind: currency, currency: coin, amount: 100 }', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.reward).to.deep.equal({ kind: 'currency', currency: 'coin', amount: 100 });",
+                  "});",
+                  "pm.test('balance.amount === 100', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.balance).to.be.an('object');",
+                  "  pm.expect(j.balance.currency).to.equal('coin');",
+                  "  pm.expect(j.balance.amount).to.equal(100);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Balance",
+      "description": "Wallet read. The single-balance/200 case depends on the Missions/Claim having run before — that mint creates the `coin` row. The 404 case targets a currency the user has never held.",
+      "item": [
+        {
+          "name": "List balances (GET /v1/balance)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/balance",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "balance"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('balances is an array', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.balances).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get single balance — existing (GET /v1/balance/coin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/balance/coin",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "balance", "coin"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Missions/Claim runs before Balance in the collection order, so",
+                  "// the `coin` row should exist with amount=100. Be tolerant of 404",
+                  "// (the claim may have failed for an environmental reason we don't",
+                  "// want to mask) — in that case fail with a clear message.",
+                  "pm.test('200 OK after upstream claim minted coin', () => {",
+                  "  if (pm.response.code === 404) {",
+                  "    throw new Error('expected 200 (coin minted by upstream claim) but got 404 — did the claim succeed?');",
+                  "  }",
+                  "  pm.expect(pm.response.code).to.equal(200);",
+                  "});",
+                  "pm.test('balance.currency === coin + amount === 100', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.balance).to.be.an('object');",
+                  "  pm.expect(j.balance.currency).to.equal('coin');",
+                  "  pm.expect(j.balance.amount).to.equal(100);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get single balance — missing (GET /v1/balance/nonexistent)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/balance/nonexistent",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "balance", "nonexistent"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404 Not Found', () => pm.response.to.have.status(404));",
+                  "pm.test('error === balance_not_found', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.error).to.equal('balance_not_found');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Campaigns",
+      "description": "Campaign read. The seeded data has two campaigns (camp_ecom_2026q2, camp_stream_2026q2); the e-commerce one carries 3 missions.",
+      "item": [
+        {
+          "name": "List campaigns (GET /v1/campaigns)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/campaigns",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "campaigns"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('campaigns array length 2', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.campaigns).to.be.an('array');",
+                  "  pm.expect(j.campaigns.length, 'seed campaign count').to.equal(2);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get single campaign (GET /v1/campaigns/camp_ecom_2026q2)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/campaigns/camp_ecom_2026q2",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "campaigns", "camp_ecom_2026q2"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('campaign.id matches + missionIds length 3', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.campaign).to.be.an('object');",
+                  "  pm.expect(j.campaign.id).to.equal('camp_ecom_2026q2');",
+                  "  pm.expect(j.campaign.missionIds).to.be.an('array');",
+                  "  pm.expect(j.campaign.missionIds.length).to.equal(3);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get single campaign with missions (GET /v1/campaigns/camp_ecom_2026q2?include=missions)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/campaigns/camp_ecom_2026q2?include=missions",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "campaigns", "camp_ecom_2026q2"],
+              "query": [{ "key": "include", "value": "missions" }]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('missions[] hydrated, length 3', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.missions, 'hydrated missions array').to.be.an('array');",
+                  "  pm.expect(j.missions.length).to.equal(3);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "SSE",
+      "description": "Live update fanout. Postman/Newman's HTTP layer doesn't stream — a normal request to /v1/sse/updates would hang for the connection's lifetime. The SSE handshake is therefore exercised via pm.sendRequest in the pre-request script (with a tight timeout) so we can capture status + content-type, then the actual request hits /v1/health (a cheap, always-200 probe) to keep Newman happy. The assertions read the captured headers from collection variables.",
+      "item": [
+        {
+          "name": "SSE updates handshake (GET /v1/sse/updates via pre-request)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/health",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "health"]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Open a short-lived SSE connection just long enough to grab the",
+                  "// response headers. Newman's pm.sendRequest doesn't stream the",
+                  "// body, so the callback fires once the underlying request reads",
+                  "// SOMETHING — usually the first SSE frame, then we abort by",
+                  "// letting the request settle on its own short timeout.",
+                  "const baseUrl = pm.collectionVariables.get('base_url');",
+                  "const token = pm.collectionVariables.get('token');",
+                  "pm.collectionVariables.set('sse_status', '');",
+                  "pm.collectionVariables.set('sse_content_type', '');",
+                  "",
+                  "pm.sendRequest({",
+                  "  url: `${baseUrl}/v1/sse/updates`,",
+                  "  method: 'GET',",
+                  "  header: { 'authorization': `Bearer ${token}`, 'accept': 'text/event-stream' },",
+                  "  // pm.sendRequest supports per-request timeout in ms (Postman 10+).",
+                  "  timeout: 2000",
+                  "}, (err, res) => {",
+                  "  if (err) {",
+                  "    // Timeout error is expected once we've read the first frame;",
+                  "    // some Postman versions surface the error before headers are",
+                  "    // populated. Try to read them anyway.",
+                  "    console.log('[sse] pm.sendRequest err (often expected on stream):', err && err.message);",
+                  "  }",
+                  "  if (res) {",
+                  "    pm.collectionVariables.set('sse_status', String(res.code));",
+                  "    pm.collectionVariables.set('sse_content_type', res.headers.get('content-type') || '');",
+                  "  }",
+                  "});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The actual request (to /v1/health) is just a placeholder.",
+                  "// Assertions read the SSE response captured in the pre-request.",
+                  "pm.test('health probe 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('SSE handshake returned 200', () => {",
+                  "  const status = pm.collectionVariables.get('sse_status');",
+                  "  pm.expect(status, 'sse_status (set by pre-request)').to.equal('200');",
+                  "});",
+                  "pm.test('SSE content-type is text/event-stream', () => {",
+                  "  const ct = pm.collectionVariables.get('sse_content_type');",
+                  "  pm.expect(ct, 'sse_content_type').to.contain('text/event-stream');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

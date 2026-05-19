@@ -38,6 +38,7 @@ build/
 .nyc_output/
 test-results/
 playwright-report/
+postman/newman-report.json
 
 # Editor / OS
 Thumbs.db

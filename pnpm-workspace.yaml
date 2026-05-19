@@ -24,8 +24,12 @@ catalog:
   tsdown: ^0.22.0
 
   # Test tooling
-  vitest: ^3.2.0
-  "@cloudflare/vitest-pool-workers": ^0.6.0
+  # Bumped at TASK-007 to satisfy peer-dep contract:
+  #   @cloudflare/vitest-pool-workers@0.16.6 requires vitest ^4.1.0
+  #   (the old pinning of 3.2/0.6 mismatched peers; no tests existed yet,
+  #    so migration cost was zero).
+  vitest: ^4.1.6
+  "@cloudflare/vitest-pool-workers": ^0.16.6
   jest: ^29.7.0
   ts-jest: ^29.2.5
   jest-environment-jsdom: ^29.7.0

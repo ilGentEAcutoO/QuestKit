@@ -1,0 +1,304 @@
+/**
+ * /v1/missions — list / detail / claim routes (TASK-010).
+ *
+ * All routes require auth (JWT Bearer via `requireAuth`).
+ *
+ * ## Routes
+ *
+ *   GET  /v1/missions?campaignId&status&limit&cursor
+ *     Lists missions (paginated by opaque cursor). When `status` is supplied
+ *     the result is filtered to missions where the caller has a progress row
+ *     of that status — i.e. it joins user progress into the listing. Returns
+ *     `{ missions, progress, nextCursor? }`. `progress` is a map keyed by
+ *     mission id; entries only exist for missions that have a progress row.
+ *
+ *   GET  /v1/missions/:id
+ *     Returns one mission + the caller's progress (null if no row).
+ *
+ *   POST /v1/missions/:id/claim
+ *     Atomic transition completed → claimed + reward mint. Idempotent on the
+ *     Idempotency-Key header (replay returns the same response with
+ *     `X-Idempotent-Replay: hit`). Without the header, the helper still
+ *     handles "already claimed" via SELECT-then-CAS-batch — see
+ *     `db/schema.ts#claimMission`. Broadcasts an SDKUpdate over SSE_HUB
+ *     (best-effort: a broken hub is logged but does not fail the claim).
+ *
+ * ## SSE broadcast variant
+ *
+ * The SDKUpdate union (packages/types/src/sdk-update.ts) doesn't have a
+ * dedicated `mission.claimed` variant. We use `reward.granted` for the claim
+ * itself (carries userId + reward + missionId) and additionally broadcast a
+ * `balance.changed` event when balance is non-null. See the report for the
+ * flag to TASK-002.
+ *
+ * ## Rate-limiter note
+ *
+ * Read routes (GET) do not call the rate-limiter — events.ts is the only
+ * route that needs the per-JWT limit today. POST /:id/claim could plausibly
+ * need it as well; that wire-up is left as a follow-up (low priority — the
+ * claim path is gated by a strict completed→claimed CAS, so abuse is bounded
+ * by the rule engine).
+ */
+import type {
+  Balance,
+  Mission,
+  MissionProgress,
+  Reward,
+  SDKUpdate,
+} from "@questkit/types";
+import { Hono } from "hono";
+import { requireAuth } from "../auth/middleware";
+import {
+  claimMission as claimMissionDb,
+  getMission,
+  getProgress,
+  listMissions,
+  listProgressForUser,
+} from "../db/schema";
+import * as idem from "../services/idempotency";
+
+interface MissionsVars {
+  userId: string;
+  jti: string;
+}
+
+const missions = new Hono<{ Bindings: Env; Variables: MissionsVars }>();
+
+missions.use("/*", requireAuth());
+
+interface MissionsListResponse {
+  missions: Mission[];
+  progress: Record<string, MissionProgress>;
+  nextCursor?: string;
+}
+
+interface MissionDetailResponse {
+  mission: Mission;
+  progress: MissionProgress | null;
+}
+
+interface ClaimResponse {
+  progress: MissionProgress;
+  balance: Balance | null;
+  reward: Reward;
+}
+
+/**
+ * Parse + validate the `status` query param. Returns one of the valid status
+ * filter values or null for "no filter". Unknown values fall back to null
+ * (lenient — clients may forward stale enums and we'd rather render the full
+ * list than 400).
+ */
+function parseStatusFilter(
+  raw: string | undefined,
+): MissionProgress["status"] | "all" | null {
+  if (raw === undefined || raw === "" || raw === "all") return "all";
+  if (
+    raw === "locked" ||
+    raw === "active" ||
+    raw === "completed" ||
+    raw === "claimed"
+  ) {
+    return raw;
+  }
+  return "all";
+}
+
+missions.get("/", async (c) => {
+  const userId = c.var.userId;
+  const url = new URL(c.req.url);
+  const campaignId = url.searchParams.get("campaignId") ?? undefined;
+  const statusParam = url.searchParams.get("status") ?? undefined;
+  const limitParam = url.searchParams.get("limit");
+  const cursor = url.searchParams.get("cursor") ?? undefined;
+  const limit =
+    limitParam !== null && limitParam !== ""
+      ? Number.parseInt(limitParam, 10)
+      : undefined;
+
+  const statusFilter = parseStatusFilter(statusParam);
+
+  // Load the page (with the campaign filter if specified). `listMissions`
+  // already handles `limit + cursor` with the opaque base64url cursor.
+  const listOpts: {
+    campaignId?: string;
+    limit?: number;
+    cursor?: string;
+  } = {};
+  if (campaignId !== undefined) listOpts.campaignId = campaignId;
+  if (limit !== undefined && Number.isFinite(limit)) listOpts.limit = limit;
+  if (cursor !== undefined) listOpts.cursor = cursor;
+  const { missions: pageMissions, nextCursor } = await listMissions(
+    c.env.DB,
+    listOpts,
+  );
+
+  // Load the user's progress map. We pull the FULL progress set so the
+  // response can include progress for every mission on the page (callers
+  // commonly want to render progress alongside the mission). For a status
+  // filter we further winnow at status level here rather than in the DB layer
+  // because the page filter & status filter intersect in JS — we want to
+  // preserve cursor stability against listMissions's id-ordering.
+  const allProgress = await listProgressForUser(c.env.DB, userId);
+  const progressByMissionId = new Map<string, MissionProgress>();
+  for (const p of allProgress) {
+    progressByMissionId.set(p.missionId, p);
+  }
+
+  // Apply the status filter (if any) by selecting only missions whose progress
+  // status matches. "all" passes everything through.
+  const filteredMissions =
+    statusFilter !== null && statusFilter !== "all"
+      ? pageMissions.filter(
+          (m) => progressByMissionId.get(m.id)?.status === statusFilter,
+        )
+      : pageMissions;
+
+  // Build the progress map keyed by mission id, restricted to missions that
+  // remain in the response.
+  const progressMap: Record<string, MissionProgress> = {};
+  for (const m of filteredMissions) {
+    const p = progressByMissionId.get(m.id);
+    if (p !== undefined) progressMap[m.id] = p;
+  }
+
+  const response: MissionsListResponse = {
+    missions: filteredMissions,
+    progress: progressMap,
+  };
+  if (nextCursor !== undefined) response.nextCursor = nextCursor;
+  return c.json(response, 200);
+});
+
+missions.get("/:id", async (c) => {
+  const userId = c.var.userId;
+  const id = c.req.param("id");
+  const mission = await getMission(c.env.DB, id);
+  if (mission === null) {
+    return c.json({ error: "mission_not_found" }, 404);
+  }
+  const progress = await getProgress(c.env.DB, userId, id);
+  const response: MissionDetailResponse = { mission, progress };
+  return c.json(response, 200);
+});
+
+/**
+ * Attempt an SSE broadcast for the claim. Best-effort: any failure is logged
+ * but does NOT propagate — the claim already succeeded. TASK-012's SDK fills
+ * the gap on reconnect (the SDK polls /v1/missions and /v1/balance on a
+ * reconnect to reconcile state).
+ *
+ * Broadcasts BOTH `reward.granted` AND (if currency reward) `balance.changed`
+ * — the SDKUpdate union doesn't have a dedicated `mission.claimed` variant,
+ * so we split the semantic into the two closest existing variants. Flag
+ * documented in the route's file-level JSDoc.
+ */
+async function tryBroadcastClaim(
+  env: Env,
+  userId: string,
+  missionId: string,
+  reward: Reward,
+  balance: Balance | null,
+): Promise<void> {
+  try {
+    const stubId = env.SSE_HUB.idFromName(userId);
+    const stub = env.SSE_HUB.get(stubId);
+    const rewardUpdate: SDKUpdate = {
+      type: "reward.granted",
+      data: { userId, reward, missionId },
+    };
+    const r1 = await stub.fetch("https://_/broadcast", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(rewardUpdate),
+    });
+    if (r1.status !== 200) {
+      console.warn(`[claim] sse-hub returned unexpected status ${r1.status}`);
+    }
+    if (balance !== null) {
+      const balanceUpdate: SDKUpdate = {
+        type: "balance.changed",
+        data: balance,
+      };
+      const r2 = await stub.fetch("https://_/broadcast", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(balanceUpdate),
+      });
+      if (r2.status !== 200) {
+        console.warn(`[claim] sse-hub returned unexpected status ${r2.status}`);
+      }
+    }
+  } catch (err) {
+    // Network-level failures: we never let the broadcast take down the claim.
+    console.warn("[claim] sse-hub broadcast threw, swallowed", err);
+  }
+}
+
+missions.post("/:id/claim", async (c) => {
+  const userId = c.var.userId;
+  const missionId = c.req.param("id");
+
+  // Step 1 — idempotency cache check (header only; claim has no body).
+  const headerKey = c.req.header("idempotency-key");
+  const idemKey =
+    typeof headerKey === "string" && headerKey.length > 0
+      ? headerKey
+      : undefined;
+  if (idemKey !== undefined) {
+    const cached = await idem.getCached<ClaimResponse>(
+      c.env.CACHE,
+      userId,
+      `claim:${idemKey}`,
+    );
+    if (cached !== null) {
+      return c.json(cached, 200, { "x-idempotent-replay": "hit" });
+    }
+  }
+
+  // Step 2 — atomic claim. The helper differentiates not_found / not_completed
+  // / claimed_now / claimed_idempotent.
+  const outcome = await claimMissionDb(c.env.DB, userId, missionId, Date.now());
+
+  if (outcome.kind === "not_found") {
+    // Differentiate "mission doesn't exist" from "user has no progress". One
+    // extra SELECT here is cheap and the precision pays off in the client UI.
+    const mission = await getMission(c.env.DB, missionId);
+    if (mission === null) {
+      return c.json({ error: "mission_not_found" }, 404);
+    }
+    // Mission exists but no progress row → treat as "not ready to claim".
+    return c.json({ error: "claim_not_ready" }, 409);
+  }
+  if (outcome.kind === "not_completed") {
+    return c.json({ error: "claim_not_ready" }, 409);
+  }
+
+  // claimed_now or claimed_idempotent — same response shape.
+  const response: ClaimResponse = {
+    progress: outcome.progress,
+    balance: outcome.balance,
+    reward: outcome.reward,
+  };
+
+  // Step 3 — broadcast on a fresh claim only. Idempotent replays should NOT
+  // re-broadcast (the original broadcast already fired).
+  if (outcome.kind === "claimed_now") {
+    await tryBroadcastClaim(
+      c.env,
+      userId,
+      missionId,
+      outcome.reward,
+      outcome.balance,
+    );
+  }
+
+  // Step 4 — cache the response for idempotent replay.
+  if (idemKey !== undefined) {
+    await idem.putCached(c.env.CACHE, userId, `claim:${idemKey}`, response);
+  }
+
+  return c.json(response, 200);
+});
+
+export default missions;

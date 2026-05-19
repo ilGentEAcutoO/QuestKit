@@ -3,10 +3,21 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "rootDir": ".",
-    "types": ["@cloudflare/workers-types/2023-07-01"],
+    // - @cloudflare/workers-types: Workers runtime globals (Request, KV, D1, …)
+    // - node: required for vitest.config.ts (node:path, node:url, import.meta.url).
+    //   We have `nodejs_compat` on so this also matches the runtime profile.
+    // The `cloudflare:test` ambient module (env, SELF, applyD1Migrations) is
+    // brought in by test/env.d.ts so test files typecheck without polluting
+    // the production source's global ambient namespace.
+    "types": ["@cloudflare/workers-types/2023-07-01", "node"],
     "noEmit": true,
     "outDir": "dist"
   },
-  "include": ["src/**/*", "worker-configuration.d.ts"],
+  "include": [
+    "src/**/*",
+    "test/**/*",
+    "vitest.config.ts",
+    "worker-configuration.d.ts"
+  ],
   "exclude": ["node_modules", "dist", ".wrangler"]
 }

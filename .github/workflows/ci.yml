@@ -60,3 +60,33 @@ jobs:
       - name: Audit production dependencies
         run: pnpm audit --prod --audit-level=high
         continue-on-error: true
+
+  newman:
+    name: Newman API contract tests
+    runs-on: ubuntu-latest
+    needs: [verify]
+    # PRs can't access the QUESTKIT_APP_SECRET secret. Only run Newman on
+    # pushes to main, so the production worker is exercised after the merge.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Run Newman against api.questkit.jairukchan.com
+        env:
+          BASE_URL: https://api.questkit.jairukchan.com
+          APP_ID: demo
+          APP_SECRET: ${{ secrets.QUESTKIT_APP_SECRET }}
+        run: bash ./postman/newman-ci.sh
+
+      - name: Upload Newman JSON report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: newman-report
+          path: ./postman/newman-report.json

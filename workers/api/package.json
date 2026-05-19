@@ -11,7 +11,11 @@
     "cf-typegen": "wrangler types",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "db:migrate:local": "wrangler d1 migrations apply questkit-d1-main --local",
+    "db:migrate:remote": "wrangler d1 migrations apply questkit-d1-main --remote --config wrangler.dev.jsonc",
+    "db:seed:local": "wrangler d1 execute questkit-d1-main --file=./migrations/0002_seed_sample_data.sql --local",
+    "db:seed:remote": "wrangler d1 execute questkit-d1-main --file=./migrations/0002_seed_sample_data.sql --remote --config wrangler.dev.jsonc"
   },
   "dependencies": {
     "@questkit/types": "workspace:^",
@@ -20,6 +24,8 @@
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "catalog:",
     "@cloudflare/workers-types": "catalog:",
+    "@types/node": "catalog:",
+    "@vitest/coverage-istanbul": "^4.1.6",
     "typescript": "catalog:",
     "vitest": "catalog:",
     "wrangler": "catalog:"
