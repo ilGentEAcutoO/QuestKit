@@ -40,6 +40,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # The Env type in worker-configuration.d.ts is generated at install-time
+      # locally; the file is gitignored per spec §11. CI must regenerate it so
+      # typecheck + test can resolve c.env.DB, c.env.RATE_LIMITER, etc.
+      - name: Generate wrangler types
+        run: pnpm --filter @questkit/worker-api cf-typegen
+
       - name: Lint
         run: pnpm lint
         env:
