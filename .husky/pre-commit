@@ -1,0 +1,13 @@
+#!/usr/bin/env sh
+# Format and lint staged files via lint-staged. Authoritative.
+pnpm lint-staged
+
+# Local gitleaks scan if installed. CI runs gitleaks-action regardless,
+# so this is an advisory pre-flight — non-fatal when the binary is absent.
+if command -v gitleaks >/dev/null 2>&1; then
+  gitleaks detect --staged --no-banner --config gitleaks.toml
+elif pnpm exec gitleaks --version >/dev/null 2>&1; then
+  pnpm exec gitleaks detect --staged --no-banner --config gitleaks.toml
+else
+  echo "gitleaks: not installed locally — skipping (will run in CI)"
+fi

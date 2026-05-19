@@ -1,0 +1,7 @@
+{
+  "name": "@questkit/worker-webhook-relay",
+  "type": "module",
+  "version": "0.0.0",
+  "private": true,
+  "description": "questkit-worker-webhook-relay — HMAC verify + Queue producer (placeholder — populated in TASK-021)."
+}

@@ -1,0 +1,79 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "questkit-worker-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-05-19",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+
+  // D1 — source of truth for missions / progress / balances / events / campaigns.
+  // database_id is a placeholder; real values live in gitignored wrangler.dev.jsonc
+  // for local, and in GitHub Actions secrets for CI deploys.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "questkit-d1-main",
+      "database_id": "<set-per-env>"
+    }
+  ],
+
+  // KV — idempotency cache (24h), JWT denylist, AI recommendation cache (1h).
+  "kv_namespaces": [
+    {
+      "binding": "CACHE",
+      "id": "<set-per-env>"
+    }
+  ],
+
+  // R2 — badge icons, campaign banners, exports. Binding intentionally named
+  // ASSETS_R2 to avoid clash with the Workers [assets] static-hosting binding
+  // (per plan §2.2 / amendment A7).
+  "r2_buckets": [
+    {
+      "binding": "ASSETS_R2",
+      "bucket_name": "questkit-r2-assets"
+    }
+  ],
+
+  // Queues — producer side for inbound webhooks. Consumer lives in
+  // workers/webhook-consumer. Producer binding works even before the queue
+  // exists; create it with `wrangler queues create questkit-queue-webhooks`.
+  "queues": {
+    "producers": [
+      {
+        "binding": "WEBHOOK_QUEUE",
+        "queue": "questkit-queue-webhooks"
+      }
+    ]
+  },
+
+  // Durable Objects — per-JWT sliding-window rate limiter and per-user SSE
+  // fanout hub. Classes are stub-exported from src/index.ts today; full
+  // implementation lands in TASK-011. The migrations[].new_sqlite_classes
+  // entry is required since SQLite-DOs became the default (plan amendment A5).
+  "durable_objects": {
+    "bindings": [
+      { "name": "RATE_LIMITER", "class_name": "RateLimiter" },
+      { "name": "SSE_HUB", "class_name": "SSEHub" }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["RateLimiter", "SSEHub"]
+    }
+  ],
+
+  // Analytics Engine — event ingest metrics + lag tracking.
+  "analytics_engine_datasets": [
+    {
+      "binding": "EVENTS_AE",
+      "dataset": "questkit_events"
+    }
+  ],
+
+  // Workers AI — recommendations via @cf/meta/llama-3.1-8b-instruct-fast
+  // (the base llama-3.1-8b-instruct model deprecates 2026-05-30 per plan
+  // amendment A8). No resource to create; binding is the API surface.
+  "ai": { "binding": "AI" }
+}

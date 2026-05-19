@@ -1,0 +1,27 @@
+{
+  "name": "@questkit/worker-api",
+  "type": "module",
+  "version": "0.0.0",
+  "private": true,
+  "description": "questkit-worker-api — REST + SSE + Durable Objects + Workers AI + D1 + KV + R2 + Analytics Engine.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "deploy:dry-run": "wrangler deploy --dry-run",
+    "cf-typegen": "wrangler types",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@questkit/types": "workspace:^",
+    "hono": "catalog:"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "catalog:",
+    "@cloudflare/workers-types": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:",
+    "wrangler": "catalog:"
+  }
+}

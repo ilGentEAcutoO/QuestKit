@@ -1,0 +1,12 @@
+# QuestKit local secrets — copy to .dev.vars and fill in.
+# .dev.vars is gitignored. Production values: `wrangler secret put NAME` per worker.
+# Wrangler reads .dev.vars from THIS directory (workers/api/) during `wrangler dev`.
+
+# JWT signing key — generate: openssl rand -base64 48
+JWT_SECRET=
+
+# Inbound webhook HMAC verification — generate: openssl rand -base64 48
+WEBHOOK_HMAC_SECRET=
+
+# App-level shared secret for /v1/auth/token — generate: openssl rand -base64 48
+APP_SECRET=

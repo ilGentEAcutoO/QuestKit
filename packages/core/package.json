@@ -1,0 +1,15 @@
+{
+  "name": "@questkit/core",
+  "type": "module",
+  "version": "0.1.0",
+  "description": "QuestKit vanilla TypeScript SDK client (placeholder — populated in TASK-012).",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ilGentEAcutoO/QuestKit.git",
+    "directory": "packages/core"
+  }
+}

@@ -1,0 +1,25 @@
+# gitleaks config — extends the default ruleset.
+# Docs: https://github.com/gitleaks/gitleaks#configuration
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "QuestKit placeholders and reference docs"
+
+# .dev.vars.example holds empty secret placeholders + generation hints,
+# not real values. Wildcard catches per-worker copies too.
+paths = [
+  '''\.dev\.vars\.example$''',
+  '''workers/.+/\.dev\.vars\.example$''',
+  # Spec and plan documents quote configuration snippets and sample IDs
+  # that look like secrets to scanners but are intentional placeholders.
+  '''instruction/instruction\.md$''',
+  '''instruction/work/plan\.md$''',
+]
+
+# Regex allowlist for known-safe placeholder strings.
+regexes = [
+  '''<set-per-env>''',
+  '''openssl rand -base64''',
+]

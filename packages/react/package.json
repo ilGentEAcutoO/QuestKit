@@ -1,0 +1,15 @@
+{
+  "name": "@questkit/react",
+  "type": "module",
+  "version": "0.1.0",
+  "description": "QuestKit React component library and hooks (placeholder — populated in TASK-014).",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ilGentEAcutoO/QuestKit.git",
+    "directory": "packages/react"
+  }
+}

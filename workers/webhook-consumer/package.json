@@ -1,0 +1,7 @@
+{
+  "name": "@questkit/worker-webhook-consumer",
+  "type": "module",
+  "version": "0.0.0",
+  "private": true,
+  "description": "questkit-worker-webhook-consumer — Queue consumer + WorkerEntrypoint RPC to api (placeholder — populated in TASK-022)."
+}

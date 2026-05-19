@@ -1,0 +1,7 @@
+{
+  "name": "@questkit/docs",
+  "type": "module",
+  "version": "0.0.0",
+  "private": true,
+  "description": "QuestKit Docusaurus documentation site (placeholder — built in TASK-026)."
+}

@@ -1,0 +1,44 @@
+# Spec §11 — Public Repo Hygiene
+node_modules/
+dist/
+.turbo/
+.wrangler/
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+wrangler.dev.toml
+wrangler.*.toml
+!wrangler.toml
+.env
+.env.*
+*.log
+.DS_Store
+coverage/
+.cache/
+.parcel-cache/
+.idea/
+.vscode/*
+!.vscode/settings.json.example
+*.tsbuildinfo
+
+# JSONC variants of wrangler dev config (since we use wrangler.jsonc, not .toml)
+wrangler.jsonc.dev
+wrangler.dev.jsonc
+
+# Generated Cloudflare Worker types — regenerated via `wrangler types`
+worker-configuration.d.ts
+
+# Changesets cache
+.changeset/.cache/
+
+# Build outputs (Docusaurus, Vite, etc.)
+build/
+
+# Test artefacts
+.nyc_output/
+test-results/
+playwright-report/
+
+# Editor / OS
+Thumbs.db
+*.swp

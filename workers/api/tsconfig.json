@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "types": ["@cloudflare/workers-types/2023-07-01"],
+    "noEmit": true,
+    "outDir": "dist"
+  },
+  "include": ["src/**/*", "worker-configuration.d.ts"],
+  "exclude": ["node_modules", "dist", ".wrangler"]
+}
