@@ -41,10 +41,14 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       # The Env type in worker-configuration.d.ts is generated at install-time
-      # locally; the file is gitignored per spec §11. CI must regenerate it so
-      # typecheck + test can resolve c.env.DB, c.env.RATE_LIMITER, etc.
+      # locally; the file is gitignored per spec §11. CI must regenerate it for
+      # every worker so typecheck + test can resolve c.env.DB, c.env.WEBHOOK_QUEUE,
+      # etc.
       - name: Generate wrangler types
-        run: pnpm --filter @questkit/worker-api cf-typegen
+        run: |
+          pnpm --filter @questkit/worker-api cf-typegen
+          pnpm --filter @questkit/worker-webhook-relay cf-typegen
+          pnpm --filter @questkit/worker-webhook-consumer cf-typegen
 
       - name: Lint
         run: pnpm lint
