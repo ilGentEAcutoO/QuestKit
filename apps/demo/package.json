@@ -1,7 +1,39 @@
 {
   "name": "@questkit/demo",
   "type": "module",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
-  "description": "QuestKit showcase app (placeholder — built in TASK-024)."
+  "description": "questkit-worker-demo — Vite + React + Tailwind v4 SPA hosted as a static-asset Cloudflare Worker with an inline /api/token JWT-mint proxy.",
+  "scripts": {
+    "dev": "vite",
+    "dev:worker": "vite build && wrangler dev",
+    "build": "vite build",
+    "preview": "vite preview",
+    "deploy": "vite build && wrangler deploy",
+    "deploy:dry-run": "vite build && wrangler deploy --dry-run",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "clean": "rimraf dist .turbo .wrangler"
+  },
+  "dependencies": {
+    "@questkit/core": "workspace:^",
+    "@questkit/react": "workspace:^",
+    "@questkit/types": "workspace:^",
+    "framer-motion": "catalog:",
+    "hono": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "react-router-dom": "catalog:"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@vitejs/plugin-react": "catalog:",
+    "rimraf": "^6.0.1",
+    "tailwindcss": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "wrangler": "catalog:"
+  }
 }

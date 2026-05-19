@@ -1,0 +1,30 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "questkit-worker-demo",
+  "main": "src/server/index.ts",
+  "compatibility_date": "2026-05-19",
+  "observability": { "enabled": true },
+
+  // Dual-mode worker: Hono router (POST /api/token JWT mint) runs first
+  // for any /api/* path; everything else is served from the Vite build by
+  // the [assets] binding. The SPA `not_found_handling` rewrites unknown
+  // routes to /index.html so React Router can take over on the client.
+  //
+  // The route block (api/* → worker, * → assets) is fully expressed via
+  // `run_worker_first` — no additional matchers needed.
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application",
+    "binding": "ASSETS_BINDING",
+    "run_worker_first": ["/api/*"]
+  }
+
+  // APP_SECRET is intentionally NOT declared here — it is set via
+  // `wrangler secret put APP_SECRET --name questkit-worker-demo` at deploy
+  // time and reaches the worker via `c.env.APP_SECRET`. The value must
+  // match the APP_SECRET on `questkit-worker-api` so the upstream
+  // /v1/auth/token call succeeds.
+  //
+  // Custom-domain wiring (apex / demo.questkit.jairukchan.com) is
+  // deferred to TASK-030 (Phase 6).
+}

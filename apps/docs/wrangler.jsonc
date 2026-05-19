@@ -1,0 +1,21 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "questkit-worker-docs",
+  "compatibility_date": "2026-05-19",
+  "observability": { "enabled": true },
+
+  // Pure static-asset Worker. No `main` / `src/index.ts` — Docusaurus emits a
+  // static site into `./build` and the [assets] binding serves it directly.
+  //
+  // `not_found_handling: "404-page"` matches Docusaurus's own 404 page output
+  // (build/404.html). The docs site is NOT an SPA, so we do not want unknown
+  // routes silently rewriting to the home page.
+  "assets": {
+    "directory": "./build",
+    "not_found_handling": "404-page"
+  }
+
+  // Custom-domain wiring (docs.questkit.jairukchan.com) is intentionally
+  // deferred to TASK-030 (Phase 6). Until then `wrangler deploy --dry-run`
+  // keeps this config honest.
+}

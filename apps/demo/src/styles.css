@@ -1,0 +1,79 @@
+/*
+ * QuestKit demo Tailwind v4 entry.
+ *
+ * We import @questkit/react/styles.css from main.tsx (so the widget tokens
+ * are registered). This file owns the demo-specific surface — page-wide
+ * colors, dark-mode tokens, scrollbar polish — without colliding with the
+ * widget @theme block.
+ */
+@import 'tailwindcss';
+
+@theme {
+  /* Demo-only "app surface" tokens. These are NOT widget tokens — they
+   * style the host shell (nav, cards, panel chrome). The qk-* tokens from
+   * @questkit/react/styles.css remain authoritative for the widgets. */
+  --color-demo-surface: oklch(0.985 0.003 264);
+  --color-demo-surface-2: oklch(0.96 0.006 264);
+  --color-demo-ink: oklch(0.21 0.02 264);
+  --color-demo-muted: oklch(0.55 0.02 264);
+  --color-demo-border: oklch(0.9 0.005 264);
+  --color-demo-accent: oklch(0.62 0.18 264);
+
+  /* Geometry */
+  --radius-card: 0.875rem;
+  --radius-pill: 9999px;
+}
+
+/* Dark theme — toggled via <html data-theme="dark">. The DevTools panel
+ * flips this attribute; no rerender, no React state change. */
+html[data-theme='dark'] {
+  --color-demo-surface: oklch(0.18 0.015 264);
+  --color-demo-surface-2: oklch(0.22 0.02 264);
+  --color-demo-ink: oklch(0.96 0.005 264);
+  --color-demo-muted: oklch(0.72 0.015 264);
+  --color-demo-border: oklch(0.32 0.018 264);
+
+  /* Match widget tokens to dark surface for visual cohesion. */
+  --color-qk-bg: oklch(0.22 0.02 264);
+  --color-qk-fg: oklch(0.96 0.005 264);
+  --color-qk-muted: oklch(0.55 0.015 264);
+}
+
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme]) {
+    color-scheme: dark;
+  }
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-demo-surface);
+  color: var(--color-demo-ink);
+  font-family: var(--font-qk);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition:
+    background 200ms ease,
+    color 200ms ease;
+}
+
+*:focus-visible {
+  outline: 2px solid var(--color-demo-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}

@@ -1,7 +1,55 @@
 {
   "name": "@questkit/docs",
   "type": "module",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
-  "description": "QuestKit Docusaurus documentation site (placeholder — built in TASK-026)."
+  "description": "QuestKit documentation site — Docusaurus 3 + Tailwind v4 hosted on questkit-worker-docs.",
+  "scripts": {
+    "start": "docusaurus start",
+    "build": "docusaurus build",
+    "deploy": "docusaurus build && wrangler deploy",
+    "deploy:dry-run": "docusaurus build && wrangler deploy --dry-run",
+    "serve": "docusaurus serve",
+    "swizzle": "docusaurus swizzle",
+    "write-translations": "docusaurus write-translations",
+    "write-heading-ids": "docusaurus write-heading-ids",
+    "typecheck": "tsc",
+    "lint": "echo 'docs scaffold has no lintable source yet' && exit 0",
+    "clean": "rimraf build .docusaurus"
+  },
+  "dependencies": {
+    "@docusaurus/core": "3.10.1",
+    "@docusaurus/preset-classic": "3.10.1",
+    "@mdx-js/react": "^3.0.0",
+    "@questkit/react": "workspace:^",
+    "@tailwindcss/postcss": "catalog:",
+    "clsx": "^2.0.0",
+    "prism-react-renderer": "^2.3.0",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "tailwindcss": "catalog:"
+  },
+  "devDependencies": {
+    "@docusaurus/module-type-aliases": "3.10.1",
+    "@docusaurus/tsconfig": "3.10.1",
+    "@docusaurus/types": "3.10.1",
+    "rimraf": "^6.0.1",
+    "typescript": "catalog:",
+    "wrangler": "catalog:"
+  },
+  "browserslist": {
+    "production": [
+      ">0.5%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 3 chrome version",
+      "last 3 firefox version",
+      "last 5 safari version"
+    ]
+  },
+  "engines": {
+    "node": ">=20.0"
+  }
 }

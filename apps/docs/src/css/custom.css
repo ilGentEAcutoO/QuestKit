@@ -1,0 +1,45 @@
+/*
+ * QuestKit docs — Tailwind v4 + Docusaurus (Infima) integration.
+ *
+ * The Infima specificity gotcha: Docusaurus ships Infima first and many of its
+ * rules use compound selectors (e.g. `.theme-doc-markdown .button`) that beat
+ * single-class Tailwind utilities (specificity 0,1,0) regardless of source
+ * order. Without intervention, `<div class="bg-blue-500">` in MDX renders
+ * with Infima's body colour rather than Tailwind blue.
+ *
+ * The supported v4 fix is `@import "tailwindcss" important;` — Tailwind emits
+ * every utility with !important, decisively winning against Infima compound
+ * selectors. The trade-off is that page-level overrides must themselves use
+ * the `!` modifier (e.g. `bg-red-500!`); this is acceptable for a docs site
+ * where Tailwind classes appear in MDX examples rather than the site chrome.
+ *
+ * Reference: https://tailwindcss.com/docs/styling-with-utility-classes#using-the-important-modifier
+ */
+@import 'tailwindcss' important;
+
+/* Pull in @questkit/react's @theme tokens so MDX examples render with the
+ * same OKLCH palette as the demo app — `bg-qk-primary`, `text-qk-coin`, etc. */
+@import '@questkit/react/styles.css';
+
+/*
+ * Map Infima's primary-colour scale to the QuestKit brand token so Docusaurus
+ * chrome (navbar, links, code blocks) matches the docs body. We only set the
+ * mid-tone; Infima derives the rest of the 0–9 scale at runtime.
+ */
+:root {
+  --ifm-color-primary: var(--color-qk-primary);
+  --ifm-color-primary-dark: var(--color-qk-primary-hover);
+  --ifm-color-primary-darker: var(--color-qk-primary-hover);
+  --ifm-color-primary-darkest: var(--color-qk-fg);
+  --ifm-color-primary-light: var(--color-qk-primary);
+  --ifm-color-primary-lighter: var(--color-qk-primary);
+  --ifm-color-primary-lightest: var(--color-qk-coin);
+  --ifm-code-font-size: 0.92rem;
+  --ifm-font-family-base: var(--font-qk);
+  --docusaurus-highlighted-code-line-bg: rgb(0 0 0 / 10%);
+}
+
+[data-theme='dark'] {
+  --ifm-color-primary: var(--color-qk-coin);
+  --docusaurus-highlighted-code-line-bg: rgb(0 0 0 / 30%);
+}

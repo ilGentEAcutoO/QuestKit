@@ -1,0 +1,13 @@
+# questkit-worker-demo — local dev secrets.
+#
+# The demo worker proxies a single endpoint (POST /api/token) to the real
+# api worker at https://api.questkit.jairukchan.com/v1/auth/token, passing
+# APP_SECRET on behalf of the browser so the secret never reaches the
+# client. The value here MUST match the APP_SECRET set on
+# questkit-worker-api (see workers/api/.dev.vars.example).
+#
+# Locally `wrangler dev` loads this file (rename to .dev.vars). In prod set
+# via `wrangler secret put APP_SECRET --name questkit-worker-demo`.
+#
+# generate: openssl rand -base64 48
+APP_SECRET=
