@@ -1,9 +1,9 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    "jsx": "react-jsx",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "rootDir": ".",
-    "jsx": "react-jsx",
     "types": ["jest", "node"],
     "noEmit": true,
     "outDir": "./dist"

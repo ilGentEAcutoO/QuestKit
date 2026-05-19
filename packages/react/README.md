@@ -13,8 +13,8 @@ pnpm add @questkit/react @questkit/core react react-dom
 ## Usage
 
 ```tsx
-import "@questkit/react/styles.css";
 import { QuestKitProvider } from "@questkit/react";
+import "@questkit/react/styles.css";
 
 function App() {
   return (
