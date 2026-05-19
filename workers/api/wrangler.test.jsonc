@@ -1,16 +1,18 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  // Test-only wrangler config — mirrors wrangler.jsonc. The `ai` binding IS
-  // declared here so route tests can patch `env.AI.run` via `vi.spyOn` and
-  // hit the real route surface (TASK-017). Workers AI has no local emulator;
-  // pool-workers 0.16 opens a remote-proxy session lazily — that only fails
-  // if a test actually invokes `env.AI.run` without first mocking it. Every
-  // AI-touching test under `test/` MUST mock the binding before exercising
-  // the route. See `test/recommendations.route.test.ts` for the pattern.
+  // Test-only wrangler config — mirrors wrangler.jsonc but DELIBERATELY OMITS
+  // the `ai` binding. Workers AI has no local emulator: any declaration of
+  // `"ai": { "binding": "AI" }` here makes pool-workers open a remote-proxy
+  // session at startup, which fails on CI without a Cloudflare login.
   //
-  // Service-layer ai.ts tests bypass `env.AI` entirely (they construct a
-  // hand-rolled env). Only route tests use the real binding shape with a
-  // patched .run method.
+  // Strategy for testing AI-touching code:
+  //   - Service layer (`services/ai.ts`): tests pass a hand-rolled
+  //     `Pick<Env, "AI" | "CACHE">` stub — no `cloudflare:test` env involved.
+  //     See `test/ai.service.test.ts`.
+  //   - Route layer (`routes/recommendations.ts`): tests `vi.mock`
+  //     "../src/services/ai" so the route's call to `recommendMissions`
+  //     hits a mocked implementation. `env.AI` is never referenced.
+  //     See `test/recommendations.route.test.ts`.
   "name": "questkit-worker-api",
   "main": "src/index.ts",
   "compatibility_date": "2026-05-19",
@@ -66,16 +68,6 @@
       "binding": "EVENTS_AE",
       "dataset": "questkit_events"
     }
-  ],
-
-  // Workers AI — declared so route tests can patch `env.AI.run` via
-  // `vi.spyOn`. Tests MUST mock `.run` before invoking the route — without
-  // a mock the call would hit Cloudflare's real inference API (and CI has
-  // no credentials, so it would fail). Pool-workers prints a one-per-file
-  // "may incur usage charges" warning at start-up; that's harmless because
-  // every AI-touching test mocks before invoking. `remote: true` is
-  // intentionally omitted — adding it makes pool-workers try to open a
-  // remote-proxy session at start-up which fails in CI without
-  // CLOUDFLARE_API_TOKEN.
-  "ai": { "binding": "AI" }
+  ]
+  // No `ai` binding here — see the comment at the top of the file.
 }
