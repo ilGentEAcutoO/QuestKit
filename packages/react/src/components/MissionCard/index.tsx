@@ -160,6 +160,22 @@ export function MissionCard({
       data-status={status}
     >
       <header className="flex items-start justify-between gap-3">
+        {mission.iconUrl !== undefined && mission.iconUrl.length > 0 && (
+          <img
+            src={mission.iconUrl}
+            alt=""
+            aria-hidden="true"
+            width={32}
+            height={32}
+            loading="lazy"
+            decoding="async"
+            className="qk-mission-card-icon flex-none"
+            style={{
+              borderRadius: "var(--radius-qk)",
+              objectFit: "cover",
+            }}
+          />
+        )}
         <div className="flex-1">
           <h3
             id={`qk-mission-${mission.id}-title`}

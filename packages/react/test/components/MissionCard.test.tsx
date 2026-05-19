@@ -124,13 +124,11 @@ describe("missionCard", () => {
 
   it("calls onClaim when the claim button is clicked", async () => {
     const client = makeFakeClient({
-      fireEvent: jest
-        .fn()
-        .mockResolvedValue({
-          accepted: true,
-          eventId: "e",
-          missionsUpdated: [],
-        }),
+      fireEvent: jest.fn().mockResolvedValue({
+        accepted: true,
+        eventId: "e",
+        missionsUpdated: [],
+      }),
     });
     const Wrapper = wrapperWith(client);
     const onClaim = jest.fn().mockResolvedValue(undefined);
@@ -152,13 +150,11 @@ describe("missionCard", () => {
 
   it("supports keyboard activation (Enter/Space) via native button semantics", async () => {
     const client = makeFakeClient({
-      fireEvent: jest
-        .fn()
-        .mockResolvedValue({
-          accepted: true,
-          eventId: "e",
-          missionsUpdated: [],
-        }),
+      fireEvent: jest.fn().mockResolvedValue({
+        accepted: true,
+        eventId: "e",
+        missionsUpdated: [],
+      }),
     });
     const Wrapper = wrapperWith(client);
     const onClaim = jest.fn().mockResolvedValue(undefined);
@@ -224,5 +220,47 @@ describe("missionCard", () => {
     // No progress = default "active" → no claim button.
     expect(screen.queryByRole("button", { name: /claim/i })).toBeNull();
     expect(screen.getByText("Click 5 times")).toBeInTheDocument();
+  });
+
+  it("renders the iconUrl when provided (and treats the image as decorative)", () => {
+    const client = makeFakeClient();
+    const Wrapper = wrapperWith(client);
+    const { container } = render(
+      <Wrapper>
+        <MissionCard
+          mission={{ ...mission, iconUrl: "https://cdn.example/m1.png" }}
+          progress={progressWith("active")}
+        />
+      </Wrapper>,
+    );
+    const img = container.querySelector(
+      ".qk-mission-card-icon",
+    ) as HTMLImageElement | null;
+    expect(img).not.toBeNull();
+    expect(img?.src).toBe("https://cdn.example/m1.png");
+    // Decorative — the <h3> title carries the semantic meaning.
+    expect(img?.getAttribute("alt")).toBe("");
+    expect(img?.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("does not render an icon element when iconUrl is omitted or empty", () => {
+    const client = makeFakeClient();
+    const Wrapper = wrapperWith(client);
+    const { container: c1 } = render(
+      <Wrapper>
+        <MissionCard mission={mission} progress={progressWith("active")} />
+      </Wrapper>,
+    );
+    expect(c1.querySelector(".qk-mission-card-icon")).toBeNull();
+
+    const { container: c2 } = render(
+      <Wrapper>
+        <MissionCard
+          mission={{ ...mission, iconUrl: "" }}
+          progress={progressWith("active")}
+        />
+      </Wrapper>,
+    );
+    expect(c2.querySelector(".qk-mission-card-icon")).toBeNull();
   });
 });

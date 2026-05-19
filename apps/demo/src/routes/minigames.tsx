@@ -6,14 +6,10 @@
  * the scratch card. Each component is keyboard accessible and respects
  * `prefers-reduced-motion`.
  */
-import {
-  ScratchCard,
-  SpinWheel,
-  type SpinWheelSlice,
-  useRewardClaimToast,
-} from "@questkit/react";
+import { ScratchCard, SpinWheel, type SpinWheelSlice } from "@questkit/react";
 import { type ReactElement, useState } from "react";
 
+import { useDemoToast } from "../components/DemoToastHost";
 import { SceneHeading } from "../components/SceneHeading";
 
 const WHEEL_SLICES: SpinWheelSlice[] = [
@@ -56,7 +52,7 @@ const WHEEL_SLICES: SpinWheelSlice[] = [
 ];
 
 export function MiniGamesRoute(): ReactElement {
-  const { show: showToast } = useRewardClaimToast();
+  const { show: showToast } = useDemoToast();
   const [lastWheelLabel, setLastWheelLabel] = useState<string | null>(null);
   const [scratchRevealed, setScratchRevealed] = useState<boolean>(false);
 

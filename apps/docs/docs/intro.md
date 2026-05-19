@@ -1,25 +1,75 @@
 ---
+slug: /
 sidebar_position: 1
+title: QuestKit
+description: Cloudflare-native gamification SDK — missions, rewards, balance, AI recommendations in one drop-in script.
 ---
 
-# QuestKit Documentation
+# QuestKit
 
-Welcome. The full doc set lands in TASK-027 (Phase 5, Day 5). For now, this single page exists so the Docusaurus scaffold and the Tailwind v4 integration can be verified end-to-end.
+**Cloudflare-native gamification SDK.** One bundle drops gamification widgets — missions, rewards, balance, AI recommendations — into any React app or any HTML page.
 
-## Tailwind v4 smoke test
+- [Live demo](https://questkit.jairukchan.com)
+- [Embed playground](https://play.questkit.jairukchan.com)
+- [GitHub](https://github.com/ilGentEAcutoO/QuestKit)
 
-The block below is rendered via raw HTML (Markdown allows inline HTML). If Tailwind v4 is wired correctly through the custom Docusaurus plugin, the box renders with a blue background, white text, padding, and rounded corners. If Infima wins the cascade, it falls back to plain body styling.
+## What you ship
 
-<div class="bg-blue-500 p-4 text-white rounded">Tailwind v4 smoke test — should be blue.</div>
+- A typed REST API for events, missions, balances, campaigns, and AI recommendations
+- A React component library (`@questkit/react`) with hooks and pre-built widgets
+- A vanilla JS embed (`@questkit/embed`) that mounts widgets via `data-*` attributes on any HTML page
+- Real-time updates over Server-Sent Events with automatic polling fallback
+- Inbound webhooks with HMAC verification and at-least-once Queue delivery
+- AI-curated mission recommendations powered by Workers AI
+- Mini-game widgets (spin wheel, scratch card) with cooldown + reduced-motion support
 
-## Theme tokens
+## Architecture in one diagram
 
-QuestKit ships its design tokens via `@questkit/react/styles.css`. The `bg-qk-primary` and `text-qk-coin` utilities below come from the shared `@theme` block — the same one the demo app uses — so docs examples theme consistently with the live demo.
+```text
+                ┌─────────────────────────────────────┐
+                │  React app  /  HTML page  /  iframe │
+                │   @questkit/react · @questkit/embed │
+                └────────────┬────────────────────────┘
+                             │ HTTPS · SSE · JWT
+                             ▼
+   ┌─────────────────────────────────────────────────────────┐
+   │           questkit-worker-api (Hono on Workers)         │
+   │   /v1/auth · /v1/events · /v1/missions · /v1/balance    │
+   │   /v1/campaigns · /v1/sse · /v1/recommendations         │
+   └──┬──────────┬──────────┬─────────────┬─────────────┬────┘
+      │          │          │             │             │
+      ▼          ▼          ▼             ▼             ▼
+   ┌────┐    ┌────┐   ┌─────────┐   ┌───────────┐  ┌───────┐
+   │ D1 │    │ KV │   │ R2      │   │ DO        │  │ AE    │
+   │    │    │    │   │ assets  │   │ RateLim   │  │ Events│
+   └────┘    └────┘   └─────────┘   │ SSEHub    │  └───────┘
+                                    └───────────┘
+                                                       ▲
+   external POST (Stripe etc.) ──┐                     │ Workers AI
+                                 ▼                     │ (Llama 3.1 8B fast)
+                  ┌──────────────────────────┐         │
+                  │ questkit-worker-         │         │
+                  │   webhook-relay          │  RPC    │
+                  │  HMAC verify + Queue     │ ──────► │
+                  └─────────┬────────────────┘   │     │
+                            │                    │     │
+                            ▼                    │     │
+                  questkit-queue-webhooks ───────┘     │
+                            │                          │
+                            ▼                          │
+                  ┌──────────────────────────┐         │
+                  │ questkit-worker-         │         │
+                  │   webhook-consumer       │ RPC ────┘
+                  │  exp-backoff · DLQ@5     │
+                  └──────────────────────────┘
+```
 
-<div class="bg-qk-primary p-4 text-white rounded">QuestKit primary brand colour.</div>
+Every URL terminates at a Cloudflare Worker — six Workers, zero non-CF runtime services.
 
-<div class="bg-qk-coin p-4 text-qk-fg rounded mt-2">QuestKit coin / reward accent.</div>
+## Choose your path
 
-## More to come
-
-In the meantime, see the [README on GitHub](https://github.com/ilGentEAcutoO/QuestKit) for installation, quick-start, and architecture details.
+- **React app?** Jump to [Getting Started → React](./getting-started.md#30-second-react-quick-start).
+- **Vanilla HTML?** Jump to [Getting Started → Embed](./getting-started.md#30-second-embed-quick-start).
+- **Wiring webhooks?** See [Webhooks → Overview](./webhooks/overview.md).
+- **Self-hosting on your own CF account?** See [Self-Hosting](./self-hosting.md).
+- **Why React if the author is a Vue dev?** [FAQ has an honest answer](./faq.md#why-react-if-youre-a-vue-dev).

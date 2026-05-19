@@ -99,7 +99,13 @@ export function EcommerceRoute(): ReactElement {
         description="Click Buy on any product to fire purchase.completed with the matching category and amount. Watch the EventLog drawer and the mission cards update in real time."
       />
 
-      <CampaignBanner campaignId="camp_ecom_2026q2" />
+      {/* Reserve vertical space so CampaignBanner's load-in doesn't shift
+       *  the catalog below it (Lighthouse CLS). The banner self-collapses
+       *  when there's no campaign, so the placeholder height is harmless
+       *  even when the banner stays empty. */}
+      <div className="min-h-[6rem]">
+        <CampaignBanner campaignId="camp_ecom_2026q2" />
+      </div>
 
       <section aria-labelledby="catalog-heading" className="space-y-3">
         <h3
@@ -152,8 +158,8 @@ export function EcommerceRoute(): ReactElement {
                   void handleBuy(product);
                 }}
                 disabled={isFiring && buying === product.id}
-                aria-label={`Buy ${product.name} for $${product.price}`}
-                className="inline-flex items-center justify-center gap-2 rounded-[var(--radius-pill)] px-4 py-2 text-sm font-semibold text-white transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-60"
+                aria-label={`Buy now: ${product.name} for $${product.price}`}
+                className="inline-flex items-center justify-center gap-2 rounded-[var(--radius-pill)] px-4 py-2 text-sm font-semibold text-white transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[color:var(--color-qk-primary)]"
                 style={{ background: "var(--color-qk-primary)" }}
               >
                 {isFiring && buying === product.id ? "Processing…" : "Buy now"}

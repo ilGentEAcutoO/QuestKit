@@ -1,0 +1,9 @@
+{
+  "label": "React",
+  "position": 7,
+  "link": {
+    "type": "generated-index",
+    "description": "QuestKitProvider, hooks, components, and theming for React applications."
+  },
+  "collapsed": false
+}

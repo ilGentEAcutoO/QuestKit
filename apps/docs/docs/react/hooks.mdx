@@ -1,0 +1,153 @@
+---
+sidebar_position: 2
+title: Hooks
+description: Hooks for missions, balances, events, campaigns, and AI recommendations.
+---
+
+# Hooks
+
+Six hooks. Every one returns the standard `HookState<T>` shape (except `useEvent`, which is imperative-only).
+
+```ts
+interface HookState<T> {
+  data: T | undefined;
+  error: QuestKitError | null;
+  isLoading: boolean;
+  isError: boolean;
+  isSuccess: boolean;
+  refetch: () => Promise<void>;
+}
+```
+
+`isLoading` / `isSuccess` / `isError` are mutually exclusive. `data` is `T | undefined` while loading and after a refetch; `null` is reserved for "the server has no row" (e.g. an unminted balance).
+
+---
+
+## `useMissions(opts?)`
+
+Fetches a list of missions and the user's progress for each. Keeps `progress` live by folding in `mission.progress` / `mission.completed` SSE updates.
+
+```tsx
+import { useMissions } from "@questkit/react";
+
+function MissionListView() {
+  const { data, isLoading, isError, refetch } = useMissions({ status: "active" });
+
+  if (isLoading) return <p>Loading…</p>;
+  if (isError) return <button onClick={refetch}>Retry</button>;
+
+  return (
+    <ul>
+      {data?.missions.map((m) => (
+        <li key={m.id}>
+          {m.title} — {Math.round((data.progress[m.id]?.progress ?? 0) * 100)}%
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+
+### Options
+
+| Field        | Type                                                          | Description                                              |
+| ------------ | ------------------------------------------------------------- | -------------------------------------------------------- |
+| `campaignId` | `string`                                                      | Filter to a single campaign.                             |
+| `status`     | `"active" \| "completed" \| "claimed" \| "locked" \| "all"`    | Filter by progress status.                               |
+| `limit`      | `number`                                                      | Server-side page size.                                   |
+| `cursor`     | `string`                                                      | Opaque pagination cursor returned by the previous page.  |
+
+Returns `HookState<{ missions: Mission[]; progress: Record<string, MissionProgress>; nextCursor?: string }>`.
+
+---
+
+## `useMission(id)`
+
+Fetches a single mission + its progress. The progress field updates on incoming SSE messages filtered by `missionId === id`.
+
+```tsx
+const { data } = useMission("daily-streak");
+// data?.mission, data?.progress
+```
+
+Returns `HookState<{ mission: Mission; progress: MissionProgress | null }>`.
+
+---
+
+## `useBalance(currency?)`
+
+Fetches the user's balance for one currency, or all currencies when called with no argument. Stays live via `balance.changed` SSE updates.
+
+```tsx
+const { data } = useBalance("gold");      // HookState<Balance | null>
+const { data: all } = useBalance();         // HookState<Balance[]>
+```
+
+| Call signature      | `data` type        | SSE behaviour                                              |
+| ------------------- | ------------------ | ---------------------------------------------------------- |
+| `useBalance(code)`  | `Balance \| null`  | Updates only when the SSE message matches that currency.   |
+| `useBalance()`      | `Balance[]`        | Upserts every `balance.changed` update by currency code.   |
+
+`null` in single-currency mode means "no row on the server yet"; render as `0`.
+
+---
+
+## `useEvent()`
+
+The only imperative hook. Returns an action you call from event handlers — no `data` field, no SSE subscription.
+
+```tsx
+import { useEvent } from "@questkit/react";
+
+function BuyButton() {
+  const { fireEvent, isFiring, error } = useEvent();
+
+  return (
+    <button
+      disabled={isFiring}
+      onClick={() =>
+        fireEvent({ name: "purchase.completed", payload: { sku: "boots-01" } })
+      }
+    >
+      {isFiring ? "Sending…" : "Buy"}
+    </button>
+  );
+}
+```
+
+### Return shape
+
+| Field       | Type                                                   | Description                                       |
+| ----------- | ------------------------------------------------------ | ------------------------------------------------- |
+| `fireEvent` | `(input: FireEventInput) => Promise<FireEventResult>`  | Fires one event. Rejects on failure.              |
+| `isFiring`  | `boolean`                                              | True while a fireEvent call is in flight.         |
+| `error`     | `QuestKitError \| null`                                | The most recent failure (cleared on next call).   |
+
+---
+
+## `useCampaign(id?)`
+
+Fetches a single campaign (with missions) or the list of campaigns. No SSE coupling — campaigns are catalog data. Call `refetch()` if a curator updates a campaign mid-session.
+
+```tsx
+const { data } = useCampaign("spring-2026"); // HookState<{ campaign, missions? }>
+const { data: list } = useCampaign();          // HookState<Campaign[]>
+```
+
+---
+
+## `useRecommendations()`
+
+Calls `/v1/recommendations` for AI-curated mission suggestions. Two cache layers protect the AI binding:
+
+- Server cache (KV, 1 hour) — the `cached` flag in the response indicates a server hit.
+- Client cache (in-memory, 5 minutes) — shared across all mounts of `<RecommendedMissions />` in the same app.
+
+```tsx
+const { data, isLoading, refetch } = useRecommendations();
+// data?.missionIds, data?.reason, data?.cached
+```
+
+`refetch()` bypasses the client cache (handy after a major user action). The client cache is auto-invalidated when the SDK receives an SSE `recommendation` update.
+
+Returns `HookState<{ missionIds: string[]; reason: string; cached: boolean; count: number }>`.

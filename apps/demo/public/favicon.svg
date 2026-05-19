@@ -1,10 +1,17 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
   <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+    <linearGradient id="bg" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#6366f1"/>
       <stop offset="1" stop-color="#8b5cf6"/>
     </linearGradient>
+    <linearGradient id="coin" x1="20" y1="20" x2="44" y2="44" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#fde68a"/>
+      <stop offset="1" stop-color="#f59e0b"/>
+    </linearGradient>
   </defs>
-  <rect width="64" height="64" rx="14" fill="url(#g)"/>
-  <text x="50%" y="50%" text-anchor="middle" dominant-baseline="central" font-family="Inter, system-ui, sans-serif" font-size="36" font-weight="700" fill="#ffffff">Q</text>
+  <rect width="64" height="64" rx="14" fill="url(#bg)"/>
+  <circle cx="32" cy="32" r="13" fill="url(#coin)" stroke="#fbbf24" stroke-width="1.5"/>
+  <path d="M30.5 25 L30.5 39 M27.5 28 L33.5 28 M27.5 36 L33.5 36 M27.5 32 L33.5 32" stroke="#92400e" stroke-width="1.6" stroke-linecap="round" fill="none"/>
+  <path d="M44 14 L52 14 L52 22" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <path d="M52 14 L40 26" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" fill="none"/>
 </svg>

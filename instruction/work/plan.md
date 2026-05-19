@@ -471,3 +471,102 @@ Research agent ran a 12-point sweep against current Cloudflare / Tailwind / Docu
 ### 10.5 New tasks added during Phase 3 close-out
 
 - **TASK-032b** — ADR-006 "Test boundaries: service-layer stubs vs `cloudflare:test` pool-workers". Captures the Phase 3 discovery (L1 + L2 above) as a permanent decision record so a future contributor reading `docs/decisions/` understands _why_ `ai.service.test.ts` uses a hand-rolled env while route tests skip AI paths. Owned by the same task group as TASK-032 (Phase 6 ADRs); priority medium; parallel with the other ADRs.
+
+### 10.6 Phase 5 Wave 6 outcomes & lessons (Added: 2026-05-19 21:45)
+
+> Wave 6 session resumed from `workflow-exit` checkpoint commit `e0218ae`. Four tracks landed in parallel/sequential — TASK-025 (Lighthouse), TASK-026b + TASK-026c (Docusaurus SSG unblock), TASK-028 Phase 1 (E2E plan). Phase 5 is now 4.7/5; only TASK-028 Phase 2 (E2E execution) remains before the Phase 5 gate. All changes uncommitted on disk; team lead drives the gate commit `feat: demo app with 4 scenarios and docusaurus documentation` after TASK-028 Phase 2 lands.
+
+#### L5 — Docusaurus 3.10 + Tailwind v4 SSR has three layers of webpack-only-`require()` leakage
+
+Three bugs in increasing-depth order, each requires its own fix; the union is the "docs build invariant" for v0.1.x.
+
+**Surface (TASK-026b)**: Infima's `default.css` is `require()`-d during SSG. Node's CJS evaluator throws `SyntaxError: Unexpected token ':'` on the `:root {` rule.
+**Fix**: `null-loader` on `.css` test in `configureWebpack` server branch + a runtime `require.extensions['.css'] = () => {}` no-op handler inside the existing BannerPlugin shim. Both are needed because some `require("…some.css")` calls in `.docusaurus/client-modules.js` bypass the loader pipeline and hit Node's CJS evaluator at SSG render time.
+
+**Middle (deeper TASK-026b discovery)**: With CSS handled, the next entry in `client-modules.js` requires `@docusaurus/theme-classic/lib/prism-include-languages.js` which imports `prism-react-renderer` (ESM-only) → `ERR_REQUIRE_ESM`.
+**Fix**: extend the same null-loader rule to also match `[\\/]\.docusaurus[\\/]client-modules\.js$` — null-loading the whole file is safe because its only purpose is invoking `onRouteUpdate`/`onRouteDidUpdate` lifecycle hooks that only fire client-side.
+
+**Deep (TASK-026c)**: Webpack-only aliases — `@theme/*`, `@site/*`, `@generated/*` — remain as literal `require()` calls in the compiled `server.bundle.js:7706` route registry. Node has no resolution rule for them; all 36 routes fail SSG with `Cannot find module '@theme/DocsRoot'` etc.
+**Fix (Fix #2 won; #1 and #3 documented as fallbacks)**: enable Docusaurus's experimental `future.faster.swcJsLoader: true` in `docusaurus.config.ts` + add `@swc/core` as a devDep. **The silent multiplier — and the actual unlock — was removing `"type": "module"` from `apps/docs/package.json`.** Docusaurus's compiled server bundle uses CommonJS `require()`; ESM-package-mode forced `.cjs` resolution everywhere, which is what was preventing the alias resolver from running.
+
+**Costs paid for the green build**: +`null-loader@^4.0.1`, +`@swc/core@^1.15.33` as devDeps of `@questkit/docs`. Combined <5 MB. Two new amendments (A23, A24 below) lock these in as build invariants.
+
+**Apply forward**:
+
+- When upgrading Docusaurus to 3.11.x+ or 4.x, revisit the necessity of all three fixes. The upstream tracking issue is <https://github.com/facebook/docusaurus/issues/11545>; if a Docusaurus release fixes the alias-leakage at the bundler level, fixes 2 and 3 may become deletable.
+- The `package.json "type"` field is now part of the docs build contract — do not casually flip it back to `"module"` "to make it modern". The current state is the load-bearing choice.
+
+#### L6 — `requestIdleCallback`-deferred panels create a _testing contract_, not just a perf win
+
+TASK-025 moved the three floating panels (AIRecommendations, DevTools, EventLog) behind a deferred mount via `requestIdleCallback` + `<Suspense>`. Dropping initial JS waterfall by ~30 KB gz saved enough to push all 5 demo routes to perf ≥ 0.92 / a11y 1.00 / BP 1.00 on Lighthouse mobile.
+
+The unintended consequence is a behavioral contract: panels mount **after** first paint, never **before**. The e2e-planner caught this and codified it as scenario S16 (`Panels appear after first paint, not before`). Future contributors who optimize by moving panels back to eager mount will break S16 _and_ regress perf — the test guards both.
+
+**Apply forward**:
+
+- When tempted to "simplify" by removing the lazy boundary on a component that's known-slow-to-mount, check whether an E2E spec already encodes that boundary as a contract. If yes, the perf savings is also a regression suite.
+- The `min-h-[6rem]` CLS guard on `<CampaignBanner>` (TASK-025 / `apps/demo/src/routes/ecommerce.tsx`) is similarly load-bearing — S7 explicitly measures Y-offset stability through banner data resolution. The token `6rem` is the reserved-space minimum; do not lower without re-checking CLS.
+
+#### L7 — Inline critical-CSS shell + static skeleton drops FCP to ~600 ms on mobile-throttled Lighthouse
+
+Demo's `apps/demo/index.html` now ships ~3 KB of inline CSS + an HTML skeleton (Q badge, 70 dvh body region) before any JS runs. This latches FCP at ~600 ms regardless of how long the React bundle takes to evaluate — Lighthouse measures pixels-on-screen, not framework-ready.
+
+**Apply forward**:
+
+- TASK-024 demo polish's "Lighthouse passes" gate is now demonstrably hittable for any single-page React app this size. The pattern (inline shell + skeleton + theme bootstrap inline) generalizes to TASK-030's docs worker too if it ever needs above-the-fold perf attention.
+- Watch out: the inline shell duplicates a small amount of styling from `styles.css`. Keep both in sync via comment markers (`/* INLINE-SHELL: keep in sync with index.html */`).
+
+#### 10.6.1 TASK-028 Phase 1 — E2E plan locked, Phase 2 deferred
+
+28 scenarios drafted by `e2e-planner` and appended to `todos.md` TASK-028 subtasks. Coverage:
+
+| Category                            | Count | Notes                                                                        |
+| ----------------------------------- | ----- | ---------------------------------------------------------------------------- |
+| Landing / redirect                  | 3     | S1-S3                                                                        |
+| E-commerce                          | 4     | S4-S7 (S7 is the CLS guard for L6 above)                                     |
+| Streaming                           | 3     | S8-S10 (S10 accepts empty-state — `camp_stream_2026q2` may have no missions) |
+| Daily streak                        | 3     | S11-S13 (S12 seeds `lastTimestamp` for UTC determinism)                      |
+| Mini-games                          | 2     | S14-S15 (S15 conditionally skips on mobile)                                  |
+| Floating panels (TASK-025 contract) | 4     | **S16 enforces the L6 contract**                                             |
+| Navigation / state                  | 3     | S20-S22                                                                      |
+| A11y                                | 2     | S23-S24 (keyboard nav + reduced-motion propagation)                          |
+| Responsive                          | 1     | S25 (375 / 768 / 1280 parametrized via Playwright projects)                  |
+| Error handling                      | 1     | S26 (mint failure UI)                                                        |
+| Embed in playground                 | 2     | S27 (Shadow DOM mount), S28 (style isolation in WP + iframe contexts)        |
+
+**Mockability split**: 18 scenarios need no API; 2 mock the mint proxy `/api/token`; 3 mock `/v1/recommendations` (Workers AI); 5 hit the real API at `https://api.questkit.jairukchan.com` or use `page.route()` interception. Phase 2 fixture in `apps/demo/e2e/_fixtures.ts` (planned, not written) installs `mockApi` and `mockMint` helpers + a `page` extension that auto-asserts zero console errors AND zero warnings in `afterEach`.
+
+**Phase 2 file plan** (locked, see todos.md TASK-028 for per-scenario mapping):
+
+- `apps/demo/playwright.config.ts` — three projects: chromium @ 1280×800, mobile-chrome @ 375×667 (Pixel-5 device descriptor), tablet-chrome @ 768×1024. `webServer: pnpm --filter @questkit/demo dev`, port 5173, `reuseExistingServer: !CI`, `forbidOnly: !!CI`.
+- `apps/playground/playwright.config.ts` — single chromium project @ 1280×800, against `wrangler dev` on the playground worker.
+- 11 spec files (`landing`, `ecommerce`, `streaming`, `daily`, `minigames`, `panels`, `navigation`, `a11y`, `responsive`, `error`, `embed`).
+- `apps/demo/e2e/_fixtures.ts` shared helpers.
+- New devDep: `@playwright/test` (catalog-pinned at workspace level).
+
+#### 10.6.2 Plan amendments
+
+- **A23** — `apps/docs/package.json` MUST NOT have `"type": "module"` while on Docusaurus 3.10.x. The current value is `"type"` absent (CommonJS default), which is load-bearing for SSG to resolve webpack-only aliases. Revisit only when upgrading to Docusaurus 4.x or when upstream issue [#11545](https://github.com/facebook/docusaurus/issues/11545) closes. Add a comment marker to `package.json` if a future edit looks tempted to "modernize" it.
+- **A24** — `future.faster.swcJsLoader: true` in `apps/docs/docusaurus.config.ts` + `@swc/core` devDep are hard requirements for docs build under Docusaurus 3.10.1 + Tailwind v4. Pin both in the docs build invariant; do not remove unless §10.6 L5's three layers also stop biting.
+- **A25** — TASK-028 Phase 2 spec files live in `apps/demo/e2e/*.spec.ts` (10 files) and `apps/playground/e2e/embed.spec.ts` (1 file). Fixture helpers in `apps/demo/e2e/_fixtures.ts`. Playwright pinned via root catalog so demo and playground use the same version.
+- **A26** — Lighthouse gate for the demo (TASK-025 / TASK-028 S16) is now perf ≥ 0.92 / a11y 1.00 / BP 1.00 on all 5 routes under mobile throttling (RTT 150 ms / CPU 4×). Future demo polish must hold this floor; the L6 deferred-panel contract is what gets us there.
+
+#### 10.6.3 Plan amendments — TASK-027 follow-ups (Added: 2026-05-20)
+
+Five gaps surfaced by `docs-content-writer` during TASK-027 are resolved here. Two were code (Mission.iconUrl render path now lands in `MissionCard`; `apps/docs/docusaurus.config.ts` migrates to the `markdown.hooks.onBrokenMarkdownLinks` form). Three are amendments that the spec / earlier plan glossed over:
+
+- **A27** — `workers/webhook-relay/src/normalize.ts` is **Stripe-only for v0.1**. The `_source` parameter is the literal `"stripe"` type, not a `Provider` enum. The relay docs (`apps/docs/docs/webhooks/*`) describe a Stripe-style HMAC scheme and a single normaliser; multi-provider routing is **deferred to v0.2**. When that lands, the literal type widens to a union and `toEvent` either dispatches by `_source` or splits into per-provider normalisers. Until then, treat the `_source` parameter as documentation, not a feature.
+- **A28** — CSS variable naming: `instruction.md` line 437 lists `--qk-coin-color` (and the other `--qk-*` names). The real codebase uses **`--color-qk-coin`** and the other `--color-qk-*` / `--radius-qk` / `--font-qk` names, because Tailwind v4's `@theme` directive requires the `--color-*` / `--radius-*` / `--font-*` namespacing for utilities to be generated. The original spec names predate the A12 Tailwind-v4 decision. Authoritative names live in `packages/react/src/styles/theme.css` and are mirrored in `apps/docs/docs/theming.md`; the spec is stale on this point.
+- **A29** — `POST /v1/missions/:id/claim` response shape: spec §4 lists `{ success, reward, newBalance }`. The implementation in `workers/api/src/routes/missions.ts:80-84` returns **`{ progress, balance, reward }`**. The SDK (`@questkit/core`) and React components consume the implementation shape; the spec wording is stale. The rename rationale: `success` is encoded in the HTTP status (200 vs 4xx); `newBalance` → `balance` because the field already carries "the balance after the claim"; `progress` was added because callers need to know the updated mission state (status transitions to `claimed`). The OpenAPI / docs (`apps/docs/docs/api/missions.md`) reflect the implementation shape; do not regress to the spec wording.
+
+#### 10.6.4 Carry-over for next session
+
+| Task             | Type            | Resume action                                                                                                                                |
+| ---------------- | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| TASK-028 Phase 2 | agent           | Scaffold playwright configs + 11 spec files + PDCA loop. Lockfile is now safe (docs-fixer-v2 done).                                          |
+| TASK-027 polish  | small follow-up | SSG surfaced broken-link warnings: `→ /`, `→ /docs/intro`, broken anchor `embed/api-reference#mount`. Non-blocking but worth a 10-min sweep. |
+| TASK-029         | user + agent    | User creates SonarCloud org; agent wires the CI step using `SonarSource/sonarqube-scan-action@v5` per A22.                                   |
+| TASK-030         | user + agent    | Agent deploys 5 remaining workers via wrangler; user wires custom domains in CF dashboard.                                                   |
+| TASK-033         | user + agent    | Agent drafts README; user records 60s screencap GIF + 1280×640 social card.                                                                  |
+| TASK-034         | user + agent    | Agent runs verification matrix; user creates `git tag v0.1.0` + GitHub Release.                                                              |
+| User reminder    | **user only**   | Register `QUESTKIT_APP_SECRET` in GitHub Settings → Secrets → Actions (Newman CI blocked since Phase 2).                                     |

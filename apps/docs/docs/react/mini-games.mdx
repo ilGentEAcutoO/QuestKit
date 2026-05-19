@@ -1,0 +1,99 @@
+---
+sidebar_position: 4
+title: Mini-Games
+description: SpinWheel and ScratchCard widgets.
+---
+
+# Mini-Games
+
+Two mini-game widgets. Both are self-contained: they own their UI, their input handling, their localStorage state, and their accessibility plumbing. Wire the `onSpin` / `onReveal` callback to your reward grant flow (usually an event fire or a direct `client.fireEvent`).
+
+## `<SpinWheel>`
+
+A weighted, SVG-based reward wheel with localStorage-persisted cooldown. Slices animate via a single CSS `transform: rotate(...)`.
+
+```tsx
+<SpinWheel
+  id="daily-spin"
+  cooldownMs={24 * 60 * 60 * 1000}
+  rewards={[
+    { label: "10 G", reward: { kind: "currency", currency: "gold", amount: 10 } },
+    { label: "Try Again", reward: { kind: "currency", currency: "gold", amount: 0 }, weight: 2 },
+    { label: "50 G", reward: { kind: "currency", currency: "gold", amount: 50 } },
+    { label: "Badge", reward: { kind: "badge", badgeId: "lucky-spin" }, weight: 0.5 },
+  ]}
+  onSpin={async (reward) => {
+    await client.fireEvent({
+      name: "spinwheel.spun",
+      payload: { reward },
+    });
+  }}
+/>
+```
+
+### Props
+
+| Prop         | Type                                         | Default | Description                                                            |
+| ------------ | -------------------------------------------- | ------- | ---------------------------------------------------------------------- |
+| `rewards`    | `SpinWheelSlice[]`                           | —       | Required. Slices in clockwise order from the top.                      |
+| `cooldownMs` | `number`                                     | —       | Required. Persisted in localStorage by `id`.                           |
+| `id`         | `string`                                     | —       | Required. Stable storage id (e.g. `"daily-spin"`).                     |
+| `onSpin`     | `(reward: Reward) => void \| Promise<void>`  | —       | Required. Called once when the wheel settles.                          |
+| `size`       | `number`                                     | `280`   | Diameter in CSS pixels.                                                |
+
+### `SpinWheelSlice`
+
+| Field    | Type      | Default                                  | Description                                              |
+| -------- | --------- | ---------------------------------------- | -------------------------------------------------------- |
+| `reward` | `Reward`  | —                                        | Required. What's granted if this slice wins.             |
+| `label`  | `string`  | —                                        | Required. Short label rendered inside the slice.         |
+| `weight` | `number`  | `1`                                      | Optional. Relative weight for the weighted draw.         |
+| `color`  | `string`  | _(palette pick)_                         | Optional CSS color for the slice fill.                   |
+
+:::tip
+The winning slice is picked via `crypto.getRandomValues()` against a cumulative-weight scan — better entropy than `Math.random()`. Under `prefers-reduced-motion`, the wheel skips the animation and calls `onSpin` synchronously.
+:::
+
+---
+
+## `<ScratchCard>`
+
+Canvas-based scratch-to-reveal card. `pointermove` paints a transparent disc into the overlay via `globalCompositeOperation = "destination-out"`. A rAF-throttled sampler counts erased pixels and fires `onReveal` exactly once at the threshold.
+
+```tsx
+<ScratchCard
+  width={280}
+  height={160}
+  threshold={0.6}
+  overlayLabel="Scratch to reveal"
+  prize={<strong>+100 G</strong>}
+  onReveal={async () => {
+    await client.fireEvent({ name: "scratch.revealed", payload: {} });
+  }}
+/>
+```
+
+### Props
+
+| Prop            | Type           | Default                | Description                                                             |
+| --------------- | -------------- | ---------------------- | ----------------------------------------------------------------------- |
+| `prize`         | `ReactNode`    | —                      | Required. Element shown underneath the overlay.                         |
+| `onReveal`      | `() => void`   | —                      | Required. Fires once when erased ratio first crosses `threshold`.       |
+| `threshold`     | `number`       | `0.6`                  | Erased-pixel ratio that triggers reveal.                                |
+| `width`         | `number`       | `280`                  | Canvas width in CSS pixels.                                             |
+| `height`        | `number`       | `160`                  | Canvas height in CSS pixels.                                            |
+| `overlayColor`  | `string`       | `--color-qk-muted`     | CSS color for the unscratched overlay.                                  |
+| `overlayLabel`  | `string`       | `"Scratch to reveal"`  | Text painted on the unscratched overlay.                                |
+
+:::tip
+The canvas is keyboard-focusable: Space or Enter triggers a 3-frame keyboard reveal animation (or an instant reveal under reduced motion). Touch input works out of the box — `touch-action: none` prevents vertical-drag scroll hijacking.
+:::
+
+## Accessibility notes
+
+Both widgets:
+
+- Carry `role="img"` / `role="status"` regions with proper labels.
+- Respect `prefers-reduced-motion` — `SpinWheel` skips the rotation, `ScratchCard` clears in one paint.
+- Announce the result via an `aria-live="polite"` region so screen readers don't miss the outcome.
+- Are keyboard-operable (Tab to focus, Enter/Space to act).

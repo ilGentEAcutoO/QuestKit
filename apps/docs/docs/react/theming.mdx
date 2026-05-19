@@ -1,0 +1,91 @@
+---
+sidebar_position: 5
+title: Theming (Tailwind v4)
+description: Override QuestKit tokens via Tailwind v4 @theme.
+---
+
+# Theming (Tailwind v4)
+
+QuestKit ships its design tokens as a Tailwind v4 `@theme` block. Every component reads from `--color-qk-*`, `--radius-qk`, and `--font-qk` — override the variables, the whole library re-themes.
+
+## How `@theme` works
+
+Tailwind v4's `@theme` directive registers a CSS variable **and** generates utility classes from it. Declaring `--color-qk-primary` makes `bg-qk-primary`, `text-qk-primary`, `ring-qk-primary` available everywhere — no `tailwind.config.js` needed.
+
+## Default tokens
+
+These ship in `@questkit/react/styles.css`:
+
+```css
+@theme {
+  --color-qk-primary: oklch(0.62 0.18 264); /* indigo */
+  --color-qk-bg:      oklch(0.99 0.004 264); /* near-white */
+  --color-qk-fg:      oklch(0.21 0.02 264);  /* near-black */
+  --color-qk-coin:    oklch(0.78 0.16 78);   /* amber */
+
+  --color-qk-primary-hover: oklch(from var(--color-qk-primary) calc(l - 0.05) c h);
+  --color-qk-muted:         oklch(from var(--color-qk-fg)     calc(l + 0.4) c h);
+
+  --radius-qk: 0.75rem;
+  --font-qk: "Inter", ui-sans-serif, system-ui, sans-serif;
+}
+```
+
+See the full variable table on [Theming](../theming.md).
+
+## Why OKLCH?
+
+OKLCH is the perceptually-uniform color space added in CSS Color Level 4. Two OKLCH colors with the same lightness look equally bright to the eye — unlike HSL, where `hsl(60, 100%, 50%)` (yellow) is dramatically brighter than `hsl(240, 100%, 50%)` (blue) despite identical "lightness". When you pick a palette, target a brightness rank:
+
+- `bg`: L 0.97–1.00 (near-white)
+- `fg`: L 0.15–0.25 (deep, readable)
+- `primary`: L 0.55–0.65 (vivid mid-tone — passes AA on `bg`)
+- `coin`: L 0.70–0.80 (warm, brighter than `primary` so it pops)
+
+## Overriding in your app
+
+Add a second `@theme` block (or plain `:root` block) **after** importing the QuestKit styles. Last writer wins.
+
+```css
+/* app.css */
+@import "@questkit/react/styles.css";
+
+@theme {
+  --color-qk-primary: oklch(0.62 0.20 30);  /* coral */
+  --color-qk-coin:    oklch(0.84 0.18 100); /* lemon */
+  --radius-qk: 0.25rem;                      /* squarer */
+}
+```
+
+## Dark mode
+
+Combine `@theme` with a `[data-theme="dark"]` selector — the components read CSS variables, so the swap is automatic:
+
+```css
+[data-theme="dark"] {
+  --color-qk-bg: oklch(0.18 0.01 264);
+  --color-qk-fg: oklch(0.95 0.01 264);
+  --color-qk-muted: oklch(0.40 0.02 264);
+}
+```
+
+Toggle by setting `document.documentElement.dataset.theme = "dark"`.
+
+## Campaign theme
+
+Campaigns can carry a `CampaignTheme.primaryColor` that overrides `--color-qk-primary` for that campaign's banner and any nested mission cards. Recipe:
+
+```tsx
+const { data } = useCampaign("spring-2026");
+
+return (
+  <div style={{ "--color-qk-primary": data?.campaign.theme?.primaryColor }}>
+    <CampaignBanner campaignId="spring-2026" />
+    {/* nested mission cards inherit the override */}
+  </div>
+);
+```
+
+## Embed (Shadow DOM) considerations
+
+The vanilla embed mounts each widget inside an open Shadow DOM. Host-page CSS variables that live on `:root` **do** cascade into the shadow root, so theming via `--color-qk-*` works as expected. Your host CSS classes and utility classes don't leak in — that's intentional (the embed is designed to look the same on any page).

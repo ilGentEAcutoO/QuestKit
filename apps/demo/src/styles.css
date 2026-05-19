@@ -15,17 +15,42 @@
   --color-demo-surface: oklch(0.985 0.003 264);
   --color-demo-surface-2: oklch(0.96 0.006 264);
   --color-demo-ink: oklch(0.21 0.02 264);
-  --color-demo-muted: oklch(0.55 0.02 264);
-  --color-demo-border: oklch(0.9 0.005 264);
-  --color-demo-accent: oklch(0.62 0.18 264);
+  --color-demo-muted: oklch(0.45 0.02 264);
+  --color-demo-border: oklch(0.88 0.005 264);
+  --color-demo-accent: oklch(0.52 0.2 264);
 
   /* Geometry */
   --radius-card: 0.875rem;
   --radius-pill: 9999px;
 }
 
+/* Demo brand override: the @questkit/react default `--color-qk-primary`
+ * (oklch 0.62 / 0.18 / 264) has 2.98:1 contrast with white text — a
+ * WCAG AA fail for CTA buttons. We darken it for the demo so Lighthouse
+ * a11y stays ≥95. The widget package keeps its placeholder; host apps
+ * (this demo, real customers) own the brand override.
+ *
+ * We use hex (not OKLCH) here because Lighthouse + Chrome's CSS rendering
+ * pipeline reports OKLCH colors back to axe-core in a way that can
+ * underestimate the lightness of dark blues. Hex sidesteps the round-trip
+ * entirely and lets axe see the exact luminance. */
+:root,
+html[data-theme='light'] {
+  --color-qk-primary: #3730a3; /* indigo-800: 8.6:1 vs white */
+  --color-qk-coin: #b45309; /* amber-700: 4.8:1 vs white */
+}
+
 /* Dark theme — toggled via <html data-theme="dark">. The DevTools panel
- * flips this attribute; no rerender, no React state change. */
+ * flips this attribute; no rerender, no React state change.
+ *
+ * IMPORTANT: we deliberately DO NOT remap `--color-qk-bg/fg` here.
+ * Those tokens are also used by `@questkit/react` widgets as
+ * foreground/background on internal surfaces (e.g. MissionList retry
+ * button uses bg=primary,fg=qk-bg). If we flip qk-bg to dark, the
+ * widget's internal contrast breaks. Instead the demo's page chrome
+ * uses its own `--color-demo-*` tokens for darkness, and the widgets
+ * stay light-themed inside dark-mode cards (a "panels-of-light"
+ * effect that is intentional and contrast-safe). */
 html[data-theme='dark'] {
   --color-demo-surface: oklch(0.18 0.015 264);
   --color-demo-surface-2: oklch(0.22 0.02 264);
@@ -33,10 +58,9 @@ html[data-theme='dark'] {
   --color-demo-muted: oklch(0.72 0.015 264);
   --color-demo-border: oklch(0.32 0.018 264);
 
-  /* Match widget tokens to dark surface for visual cohesion. */
-  --color-qk-bg: oklch(0.22 0.02 264);
-  --color-qk-fg: oklch(0.96 0.005 264);
-  --color-qk-muted: oklch(0.55 0.015 264);
+  /* Keep the AA-safe primary from light mode in dark mode too — white
+   * text on indigo-800 reads at 8.6:1 in both schemes. */
+  --color-qk-primary: #3730a3;
 }
 
 @media (prefers-color-scheme: dark) {

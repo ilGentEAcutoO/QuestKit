@@ -14,7 +14,21 @@ const config: Config = {
   projectName: "QuestKit",
 
   onBrokenLinks: "warn",
-  onBrokenMarkdownLinks: "warn",
+  markdown: {
+    hooks: {
+      onBrokenMarkdownLinks: "warn",
+    },
+  },
+
+  // Fix-2 attempt (TASK-026c): opt into Docusaurus's experimental SWC JS
+  // loader to bypass the webpack-CJS parser bug that leaves
+  // `require("@theme/...")`, `require("@site/...")`, `require("@generated/...")`
+  // as literal Node requires in the SSG server bundle.
+  future: {
+    faster: {
+      swcJsLoader: true,
+    },
+  },
 
   i18n: {
     defaultLocale: "en",

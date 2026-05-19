@@ -1,7 +1,13 @@
 /**
  * Provider payload → QuestKit `Event` normalisation.
  *
- * For TASK-021 we ship a single provider — Stripe. The shape we map from:
+ * **Scope: Stripe-only for v0.1.** See plan.md amendment A27. The `_source`
+ * parameter is typed as the literal `"stripe"` (not a `Provider` enum) on
+ * purpose — if a future v0.2 adds a second provider, the TS compiler will
+ * force every caller to be updated explicitly. Until then, the parameter is
+ * unused and the signature documents the v0.1 surface.
+ *
+ * The shape we map from:
  *
  *   {
  *     id:       "abc123",

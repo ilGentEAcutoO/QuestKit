@@ -11,15 +11,11 @@
  * streaming-specific badge unlock at 3 stays visible even when the
  * server is offline (degraded mode demo).
  */
-import {
-  MissionCard,
-  useEvent,
-  useMissions,
-  useRewardClaimToast,
-} from "@questkit/react";
-import { motion } from "framer-motion";
+import { MissionCard, useEvent, useMissions } from "@questkit/react";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { type ReactElement, useState } from "react";
 
+import { useDemoToast } from "../components/DemoToastHost";
 import { SceneHeading } from "../components/SceneHeading";
 
 interface Video {
@@ -75,11 +71,16 @@ const VIDEOS: Video[] = [
   },
 ];
 
+// 7-point ring around the badge — pre-computed angles for deterministic SSR.
+const CONFETTI_ANGLES = [0, 51, 103, 154, 206, 257, 309];
+
 export function StreamingRoute(): ReactElement {
   const { fireEvent, isFiring } = useEvent();
-  const { show: showToast } = useRewardClaimToast();
+  const { show: showToast } = useDemoToast();
+  const reduced = useReducedMotion();
   const [watchedToday, setWatchedToday] = useState<number>(0);
   const [busy, setBusy] = useState<string | null>(null);
+  const [bingeUnlocked, setBingeUnlocked] = useState<boolean>(false);
 
   // Surface a single mission preview by reusing useMissions filtered to
   // the streaming campaign — the full list lives in the EventLog/missions
@@ -103,6 +104,9 @@ export function StreamingRoute(): ReactElement {
         // Surface the unlock with a toast; the server-side rule engine
         // will fire the real reward but this gives the demo immediacy.
         showToast({ kind: "badge", badgeId: "binge_starter" });
+        setBingeUnlocked(true);
+        // Allow re-triggering for replay (resets after the burst).
+        setTimeout(() => setBingeUnlocked(false), 1200);
       }
     } catch {
       // EventLog panel surfaces fire failures.
@@ -127,11 +131,59 @@ export function StreamingRoute(): ReactElement {
           borderColor: "var(--color-demo-border)",
         }}
       >
-        <div>
-          <p className="text-sm font-semibold">Watched today</p>
-          <p className="text-xs" style={{ color: "var(--color-demo-muted)" }}>
-            Unlock the Binge Starter badge at 3.
-          </p>
+        <div className="flex items-center gap-3">
+          <div className="relative">
+            <motion.div
+              animate={
+                bingeUnlocked && !reduced
+                  ? { scale: [1, 1.25, 1], rotate: [0, -8, 8, 0] }
+                  : { scale: 1, rotate: 0 }
+              }
+              transition={{ duration: 0.6, ease: "easeOut" }}
+              aria-hidden="true"
+              className="grid h-10 w-10 place-items-center rounded-full text-xl"
+              style={{
+                background:
+                  watchedToday >= 3
+                    ? "var(--color-qk-coin)"
+                    : "var(--color-demo-surface)",
+              }}
+            >
+              {watchedToday >= 3 ? "🏆" : "📺"}
+            </motion.div>
+            <AnimatePresence>
+              {bingeUnlocked && !reduced
+                ? CONFETTI_ANGLES.map((angle, i) => (
+                    <motion.span
+                      key={i}
+                      aria-hidden="true"
+                      initial={{ opacity: 1, x: 0, y: 0, scale: 0.6 }}
+                      animate={{
+                        opacity: 0,
+                        x: Math.cos((angle * Math.PI) / 180) * 32,
+                        y: Math.sin((angle * Math.PI) / 180) * 32,
+                        scale: 1,
+                      }}
+                      exit={{ opacity: 0 }}
+                      transition={{ duration: 0.6, ease: "easeOut" }}
+                      className="pointer-events-none absolute left-1/2 top-1/2 block h-1.5 w-1.5 rounded-full"
+                      style={{
+                        background:
+                          i % 2 === 0
+                            ? "var(--color-qk-primary)"
+                            : "var(--color-qk-coin)",
+                      }}
+                    />
+                  ))
+                : null}
+            </AnimatePresence>
+          </div>
+          <div>
+            <p className="text-sm font-semibold">Watched today</p>
+            <p className="text-xs" style={{ color: "var(--color-demo-muted)" }}>
+              Unlock the Binge Starter badge at 3.
+            </p>
+          </div>
         </div>
         <div
           className="flex items-center gap-1.5"
@@ -206,7 +258,7 @@ export function StreamingRoute(): ReactElement {
                 }}
                 disabled={isFiring && busy === video.id}
                 aria-label={`Watch ${video.title}`}
-                className="inline-flex items-center justify-center gap-2 rounded-[var(--radius-pill)] px-4 py-2 text-sm font-semibold text-white transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-60"
+                className="inline-flex items-center justify-center gap-2 rounded-[var(--radius-pill)] px-4 py-2 text-sm font-semibold text-white transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[color:var(--color-qk-primary)]"
                 style={{ background: "var(--color-qk-primary)" }}
               >
                 {isFiring && busy === video.id ? "Logging…" : "Watch"}

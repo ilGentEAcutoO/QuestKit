@@ -31,6 +31,38 @@
  *    Once Docusaurus pins the SSR target to a known Node major (or webpack
  *    learns about Node 24+), this entire branch can be deleted.
  *
+ * 3. **SSR null-loader for `.css` (build-time)** — `@tailwindcss/postcss`
+ *    causes Infima's `default.css` to land in the server bundle's module
+ *    graph. We register a webpack rule that routes `.css` files through
+ *    `null-loader` for the server build only. CSS is still emitted by the
+ *    client bundle (which is what the browser uses); the server bundle only
+ *    renders HTML and never touches real stylesheets at runtime, so
+ *    swallowing them server-side is correct.
+ *
+ * 4. **SSR CSS extension handler (runtime, belt-and-braces)** — In this
+ *    project's configuration, Webpack's CommonJS parser does NOT always
+ *    process the `require("C:\\...\\some.css")` literals that Docusaurus's
+ *    codegen emits inside `.docusaurus/client-modules.js`. Some of them
+ *    survive into `server.bundle.js` as literal Node `require()` calls,
+ *    and hit `ssgRequireFunction` at SSG time. Without an extension
+ *    handler, Node tries to evaluate the CSS file as JS and throws
+ *    `SyntaxError: Unexpected token ':'`. The BannerPlugin shim below
+ *    registers a no-op `require.extensions['.css']` handler at the top of
+ *    the server bundle so any literal CSS require evaluates to
+ *    `module.exports = {}`. The webpack null-loader rule handles
+ *    build-time CSS imports that DO go through the rule pipeline; the
+ *    runtime extension handler is the fallback for those that don't.
+ *
+ * 5. **`.docusaurus/client-modules.js` null-loader** — Beyond CSS, the same
+ *    `client-modules.js` file requires `prism-react-renderer` (ESM-only,
+ *    breaks Node CommonJS `require()`) and `@theme/...` aliases (webpack-
+ *    only, unknown to Node). All four entries in that array are CLIENT
+ *    lifecycle modules — they only fire `onRouteUpdate`/`onRouteDidUpdate`
+ *    in the browser, never during SSG. Routing `null-loader` at the
+ *    generated `client-modules.js` source replaces it with an empty export
+ *    on the server build, sparing SSG from evaluating any of those side-
+ *    effectful modules. The client bundle is untouched.
+ *
  * Reference: https://docusaurus.io/docs/api/plugin-methods/lifecycle-apis#configureWebpack
  */
 module.exports = function tailwindPlugin() {
@@ -51,6 +83,11 @@ module.exports = function tailwindPlugin() {
         '  if (typeof require.resolveWeak !== "function") {',
         "    require.resolveWeak = function resolveWeak(id) { return id; };",
         "  }",
+        '  if (require.extensions && !require.extensions[".css"]) {',
+        '    require.extensions[".css"] = function noopCss(module) {',
+        "      module.exports = {};",
+        "    };",
+        "  }",
         "})();",
       ].join("\n");
       return {
@@ -61,6 +98,18 @@ module.exports = function tailwindPlugin() {
             entryOnly: true,
           }),
         ],
+        module: {
+          rules: [
+            {
+              test: /\.css$/,
+              use: require.resolve("null-loader"),
+            },
+            {
+              test: /[\\/]\.docusaurus[\\/]client-modules\.js$/,
+              use: require.resolve("null-loader"),
+            },
+          ],
+        },
       };
     },
   };

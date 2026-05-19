@@ -145,7 +145,7 @@ export function DailyRoute(): ReactElement {
             aria-label={
               claimedToday ? "Already checked in today" : "Check in for today"
             }
-            className="inline-flex min-w-[10rem] items-center justify-center gap-2 rounded-[var(--radius-pill)] px-5 py-3 text-base font-semibold text-white transition-all hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex min-w-[10rem] items-center justify-center gap-2 rounded-[var(--radius-pill)] px-5 py-3 text-base font-semibold text-white transition-all hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[color:var(--color-qk-primary)]"
             style={{ background: "var(--color-qk-primary)" }}
           >
             {isFiring ? "Saving…" : claimedToday ? "Checked in" : "Check in"}

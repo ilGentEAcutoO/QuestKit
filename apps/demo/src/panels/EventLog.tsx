@@ -114,7 +114,7 @@ export function EventLog(): ReactElement {
         aria-expanded={open}
         aria-controls="qk-event-log-drawer"
         aria-label={open ? "Close event log" : "Open event log"}
-        className="fixed bottom-4 left-4 z-40 inline-flex items-center gap-2 rounded-[var(--radius-pill)] px-4 py-2 text-sm font-medium shadow-lg transition-all hover:brightness-110 active:scale-[0.98]"
+        className="fixed bottom-4 left-4 z-40 inline-flex items-center gap-2 rounded-[var(--radius-pill)] px-4 py-2 text-sm font-medium shadow-lg transition-all hover:brightness-110 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[color:var(--color-qk-primary)]"
         style={{
           background: "var(--color-qk-fg)",
           color: "var(--color-qk-bg)",

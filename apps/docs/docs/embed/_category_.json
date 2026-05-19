@@ -1,0 +1,9 @@
+{
+  "label": "Embed",
+  "position": 8,
+  "link": {
+    "type": "generated-index",
+    "description": "Vanilla JS embed: data-attributes and the window.QuestKit imperative API."
+  },
+  "collapsed": false
+}

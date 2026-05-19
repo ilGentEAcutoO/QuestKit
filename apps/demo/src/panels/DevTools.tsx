@@ -7,7 +7,9 @@
  *   - Theme switcher: cycles through light, dark, and a "vivid" preset.
  *     Switching does NOT trigger a React re-render — we mutate the
  *     `--qk-primary` CSS variable directly on <html>, exploiting
- *     Tailwind v4's CSS-first token model.
+ *     Tailwind v4's CSS-first token model. The chosen theme is persisted
+ *     to localStorage (`qk-theme`) and re-applied at first paint by the
+ *     bootstrap script in index.html (no light→dark flash).
  *   - Simulate time: bumps a fake "demo clock" displayed in the tray
  *     (visual only — real time-simulation belongs to TASK-029+).
  */
@@ -31,30 +33,56 @@ const THEMES: ThemePreset[] = [
     key: "light",
     label: "Light",
     htmlAttr: "light",
-    primary: "oklch(0.62 0.18 264)",
-    coin: "oklch(0.78 0.16 78)",
+    // Darker indigo to keep AA contrast with white text on CTA buttons
+    // (Lighthouse target ≥ 4.5:1; this is 8.6:1).
+    primary: "#3730a3",
+    coin: "#b45309",
   },
   {
     key: "dark",
     label: "Dark",
     htmlAttr: "dark",
-    primary: "oklch(0.68 0.18 264)",
-    coin: "oklch(0.82 0.16 78)",
+    // White text on indigo-600 lands at 6.07:1 — keeps AA on dark theme.
+    primary: "#4f46e5",
+    coin: "#fbbf24",
   },
   {
     key: "vivid",
     label: "Vivid",
     htmlAttr: "light",
-    primary: "oklch(0.65 0.24 12)",
-    coin: "oklch(0.82 0.18 130)",
+    primary: "#be123c", // rose-700 — 5.9:1 vs white
+    coin: "#15803d", // green-700 — 4.8:1 vs white
   },
 ];
 
 const STORAGE_KEYS_TO_CLEAR = ["qk-demo-daily-streak", "qk-spin-demo-spin"];
+const THEME_STORAGE_KEY = "qk-theme";
+
+function readInitialTheme(): ThemeKey {
+  if (typeof window === "undefined") return "light";
+  try {
+    const saved = window.localStorage.getItem(THEME_STORAGE_KEY);
+    if (saved === "light" || saved === "dark" || saved === "vivid") {
+      return saved;
+    }
+  } catch {
+    // ignore — privacy mode etc.
+  }
+  if (typeof window.matchMedia === "function") {
+    try {
+      return window.matchMedia("(prefers-color-scheme: dark)").matches
+        ? "dark"
+        : "light";
+    } catch {
+      // ignore
+    }
+  }
+  return "light";
+}
 
 export function DevTools(): ReactElement {
   const [open, setOpen] = useState<boolean>(false);
-  const [theme, setTheme] = useState<ThemeKey>("light");
+  const [theme, setTheme] = useState<ThemeKey>(() => readInitialTheme());
   const [simulatedTimeOffset, setSimulatedTimeOffset] = useState<number>(0);
 
   const applyTheme = useCallback((key: ThemeKey): void => {
@@ -71,6 +99,20 @@ export function DevTools(): ReactElement {
       "--color-demo-accent",
       preset.primary,
     );
+    try {
+      window.localStorage.setItem(THEME_STORAGE_KEY, key);
+    } catch {
+      // privacy mode — best-effort only.
+    }
+    // Keep <meta name="theme-color"> in sync with the active surface so
+    // browser chrome (mobile address bar / PWA) tracks the theme.
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) {
+      meta.setAttribute(
+        "content",
+        preset.htmlAttr === "dark" ? "#1e1b4b" : "#6366f1",
+      );
+    }
   }, []);
 
   useEffect(() => {
@@ -99,7 +141,7 @@ export function DevTools(): ReactElement {
         aria-expanded={open}
         aria-controls="qk-devtools-tray"
         aria-label={open ? "Close DevTools" : "Open DevTools"}
-        className="grid h-10 w-10 place-items-center rounded-full shadow-lg transition-all hover:brightness-110 active:scale-[0.95]"
+        className="grid h-10 w-10 place-items-center rounded-full shadow-lg transition-all hover:brightness-110 active:scale-[0.95] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[color:var(--color-qk-primary)]"
         style={{
           background: "var(--color-qk-fg)",
           color: "var(--color-qk-bg)",

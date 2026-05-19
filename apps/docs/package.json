@@ -1,6 +1,5 @@
 {
   "name": "@questkit/docs",
-  "type": "module",
   "version": "0.1.0",
   "private": true,
   "description": "QuestKit documentation site — Docusaurus 3 + Tailwind v4 hosted on questkit-worker-docs.",
@@ -33,6 +32,8 @@
     "@docusaurus/module-type-aliases": "3.10.1",
     "@docusaurus/tsconfig": "3.10.1",
     "@docusaurus/types": "3.10.1",
+    "@swc/core": "^1.15.33",
+    "null-loader": "^4.0.1",
     "rimraf": "^6.0.1",
     "typescript": "catalog:",
     "wrangler": "catalog:"

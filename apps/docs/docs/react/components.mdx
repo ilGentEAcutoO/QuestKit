@@ -1,0 +1,157 @@
+---
+sidebar_position: 3
+title: Components
+description: Pre-built widgets — MissionList, MissionCard, CoinBalance, CampaignBanner, ProgressBar, RewardClaimToast, RecommendedMissions.
+---
+
+# Components
+
+Seven core components, all theme-driven and accessible. Each composes one or more hooks from [`Hooks`](./hooks.mdx).
+
+## `<MissionList>`
+
+Fetches a page of missions and renders one `<MissionCard>` per row. Owns the `useMissions` subscription so SSE-fed progress updates flow through a single source of truth.
+
+```tsx
+<MissionList limit={10} status="active" onClaim={(id) => client.claimMission(id)} />
+```
+
+| Prop          | Type                                                                         | Default | Description                                              |
+| ------------- | ---------------------------------------------------------------------------- | ------- | -------------------------------------------------------- |
+| `campaignId`  | `string`                                                                     | —       | Filter to a single campaign.                             |
+| `limit`       | `number`                                                                     | 50      | Initial page size; "Load more" expands by this amount.   |
+| `status`      | `"active" \| "completed" \| "claimed" \| "locked" \| "all"`                  | —       | Filter by progress status.                               |
+| `onClaim`     | `(missionId: string) => Promise<void>`                                       | —       | Forwarded to each card. Optional.                        |
+| `className`   | `string`                                                                     | —       | Appended to the root container.                          |
+
+States: `loading` (skeletons), `error` (alert + retry), `empty` (neutral copy), `loaded` (card stack).
+
+---
+
+## `<MissionCard>`
+
+Single-mission tile with progress, reward badge, and claim CTA. Presentational — does **not** subscribe to its own data; parent passes `mission` + `progress` directly.
+
+```tsx
+<MissionCard mission={mission} progress={progress} onClaim={onClaim} />
+```
+
+| Prop        | Type                                          | Default | Description                                        |
+| ----------- | --------------------------------------------- | ------- | -------------------------------------------------- |
+| `mission`   | `Mission`                                     | —       | Required. The mission to render.                   |
+| `progress`  | `MissionProgress \| undefined`                | —       | Optional — absent means "no row on the server yet".|
+| `onClaim`   | `(missionId: string) => Promise<void>`        | —       | Triggered when the user clicks "Claim".            |
+| `className` | `string`                                      | —       | Appended to the root.                              |
+
+The claim button state machine: hidden (locked/active) → visible+enabled (completed) → disabled "Claiming…" (in flight) → disabled "Claimed" (status=claimed).
+
+:::tip
+The card fires a `qk.claim.attempt` event when the button is clicked so you can build an attempted-vs-completed funnel. The actual claim mutation belongs to the parent `onClaim` handler.
+:::
+
+---
+
+## `<CoinBalance>`
+
+Displays the user's balance for one currency. Optional rolling animation when the value changes.
+
+```tsx
+<CoinBalance currency="gold" animated />
+```
+
+| Prop        | Type      | Default | Description                                                                       |
+| ----------- | --------- | ------- | --------------------------------------------------------------------------------- |
+| `currency`  | `string`  | —       | Required. E.g. `"gold"`, `"point"`, `"gem"`.                                      |
+| `animated`  | `boolean` | `false` | Rolls the displayed number on change (300 ms ease-out cubic).                     |
+| `className` | `string`  | —       | Appended to the root.                                                             |
+
+Respects `prefers-reduced-motion`; the rolling animation snaps to the final value when reduced-motion is set.
+
+---
+
+## `<CampaignBanner>`
+
+Hero strip with optional banner image and a live countdown to `endAt`.
+
+```tsx
+<CampaignBanner campaignId="spring-2026" />
+```
+
+| Prop          | Type     | Description                                  |
+| ------------- | -------- | -------------------------------------------- |
+| `campaignId`  | `string` | Required.                                    |
+| `className`   | `string` | Appended to the root.                        |
+
+Falls back to a gradient (primary → coin) when `bannerUrl` is unset. Countdown ticks once per second; uses `aria-live="off"` so screen readers aren't spammed.
+
+---
+
+## `<ProgressBar>`
+
+Accessible horizontal progress meter. Standalone — not coupled to any hook, so you can use it for non-QuestKit progress UIs too.
+
+```tsx
+<ProgressBar value={3} max={10} label="Progress: 3 of 10" />
+```
+
+| Prop        | Type     | Default | Description                                  |
+| ----------- | -------- | ------- | -------------------------------------------- |
+| `value`     | `number` | —       | Required. Clamped to `[0, max]`.             |
+| `max`       | `number` | —       | Required. Clamped to a minimum of 1.         |
+| `label`     | `string` | —       | Sets `aria-label` for screen readers.        |
+| `className` | `string` | —       | Appended to the container.                   |
+
+Renders with `role="progressbar"` + `aria-valuenow` / `aria-valuemin` / `aria-valuemax`.
+
+---
+
+## `<RewardClaimToastHost>`
+
+Portal-based reward toast layer. Mount **once** near the root of your app, inside the provider.
+
+```tsx
+import { RewardClaimToastHost, useRewardClaimToast } from "@questkit/react";
+
+function App() {
+  return (
+    <QuestKitProvider config={...}>
+      <RewardClaimToastHost durationMs={4000} />
+      <Routes />
+    </QuestKitProvider>
+  );
+}
+
+function ClaimButton({ missionId }) {
+  const { show } = useRewardClaimToast();
+  // ... call show({ kind: "currency", currency: "gold", amount: 50 }) on claim
+}
+```
+
+| Prop          | Type     | Default | Description                                |
+| ------------- | -------- | ------- | ------------------------------------------ |
+| `durationMs`  | `number` | `4000`  | How long each toast stays before fading.   |
+
+The host portals into `document.body` so toasts always layer above your normal tree. SSR-safe — the portal target is resolved on the client mount tick.
+
+`useRewardClaimToast()` returns `{ show: (reward: Reward) => void }`. The emitter is module-scoped, so `show()` works from anywhere — no need for a Context provider.
+
+---
+
+## `<RecommendedMissions>`
+
+AI-curated mission suggestions. Composes `useRecommendations()` + per-ID `useMission()` to render up to three `<MissionCard>`s with the AI's `reason` as a caption.
+
+```tsx
+<RecommendedMissions onClaim={onClaim} />
+```
+
+| Prop        | Type                                          | Description                              |
+| ----------- | --------------------------------------------- | ---------------------------------------- |
+| `onClaim`   | `(missionId: string) => Promise<void>`        | Forwarded to each card.                  |
+| `className` | `string`                                      | Appended to the root.                    |
+
+Shows a "Refreshes hourly" hint when `cached: true`. Falls back to an empty-state message when the AI has no suggestions yet.
+
+:::note
+The mini-game widgets (`<SpinWheel>`, `<ScratchCard>`) live on their own page — see [Mini-Games](./mini-games.mdx).
+:::

@@ -47,3 +47,9 @@ Thumbs.db
 # Playground — generated embed bundle copied from packages/embed/dist at build time.
 # Source of truth lives in @questkit/embed; this is a build artifact, not source.
 apps/playground/public/questkit.iife.js
+
+# Agent scratch space — temp files (screenshots, downloaded binaries, traces).
+# Never commit; CLAUDE.md rule.
+agent-temp/
+tmpnode22.zip
+tmpnode*.zip

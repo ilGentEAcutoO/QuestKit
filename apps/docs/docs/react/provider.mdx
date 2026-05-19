@@ -1,0 +1,79 @@
+---
+sidebar_position: 1
+title: QuestKitProvider
+description: The React context that owns the QuestKitClient for your app.
+---
+
+# QuestKitProvider
+
+`<QuestKitProvider>` is the only React component that's required. It constructs a `QuestKitClient` from your config, makes it available to every descendant hook, and tears it down on unmount.
+
+## Usage
+
+```tsx
+import "@questkit/react/styles.css";
+import { QuestKitProvider } from "@questkit/react";
+
+function App() {
+  return (
+    <QuestKitProvider
+      config={{
+        baseUrl: "https://api.questkit.jairukchan.com",
+        appId: "your-app-id",
+        getToken: async () => {
+          // Resolve the JWT however you like — your backend, a cookie, a meta tag.
+          const res = await fetch("/api/questkit-token");
+          const { token } = await res.json();
+          return token;
+        },
+      }}
+    >
+      <YourApp />
+    </QuestKitProvider>
+  );
+}
+```
+
+## Props
+
+| Prop       | Type                                  | Required | Description                                                                                                                                              |
+| ---------- | ------------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `config`   | `QuestKitConfig \| undefined`         | One of   | Configuration used to construct the underlying `QuestKitClient`. Required in production. Required unless `client` is passed.                             |
+| `client`   | `QuestKitClient \| undefined`         | One of   | **Test-only escape hatch.** When set, the provider uses this client instance instead of constructing a new one. The destroy-on-unmount effect is skipped. |
+| `children` | `ReactNode`                           | yes      | Your app tree.                                                                                                                                           |
+
+### `QuestKitConfig`
+
+| Field             | Type                                | Default              | Description                                                                                                                            |
+| ----------------- | ----------------------------------- | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `baseUrl`         | `string`                            | _(required)_         | API base URL, no trailing slash. E.g. `https://api.questkit.jairukchan.com`.                                                           |
+| `appId`           | `string`                            | _(required)_         | Application identifier (used by the auth handshake).                                                                                   |
+| `getToken`        | `() => Promise<string> \| string`   | _(required)_         | Resolver for the JWT bearer token. Sync or async. Called before every request and SSE connect.                                         |
+| `storage`         | `Storage`                           | `detectStorage()`    | Optional override for the persistence layer (used by the event queue and SSE reconnect state).                                         |
+| `fetchImpl`       | `typeof fetch`                      | `globalThis.fetch`   | Optional fetch override (mainly for testing).                                                                                          |
+| `pollIntervalMs`  | `number`                            | `5000`               | Poll interval used when the SSE stream gives up and falls back to polling.                                                             |
+
+## Lifecycle
+
+- `<QuestKitProvider>` constructs exactly one `QuestKitClient`. Re-renders that change unrelated props **do not** recreate the client — only `baseUrl` and `appId` changes do.
+- On unmount, `client.destroy()` is called automatically (tears down the SSE connection, drains the event queue).
+- The `getToken` resolver is invoked lazily, every time the client needs a fresh token. Cache inside the resolver if you don't want to re-mint per call.
+
+## `useQuestKit()`
+
+If you need the raw client (advanced flows — custom subscriptions, direct REST calls), call `useQuestKit()` from inside the provider:
+
+```tsx
+import { useQuestKit } from "@questkit/react";
+
+function Diagnostics() {
+  const client = useQuestKit();
+  return <button onClick={() => client.fireEvent({ name: "ping", payload: {} })}>Ping</button>;
+}
+```
+
+`useQuestKit()` throws if called outside a provider. This is intentional — a silent `null` would force every downstream hook to handle a "not wrapped" branch.
+
+:::tip
+Render the [`<RewardClaimToastHost />`](./components.mdx#rewardclaimtoasthost) once near the root, inside the provider, so `useRewardClaimToast().show()` calls from anywhere in the tree have a target portal.
+:::

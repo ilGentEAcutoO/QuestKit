@@ -20,10 +20,8 @@ export function AIRecommendations(): ReactElement {
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-controls="qk-ai-recs-panel"
-        aria-label={
-          open ? "Close AI recommendations" : "Open AI recommendations"
-        }
-        className="inline-flex items-center gap-2 rounded-[var(--radius-pill)] px-4 py-2 text-sm font-medium shadow-lg transition-all hover:brightness-110 active:scale-[0.98]"
+        aria-label={open ? "Close AI picks panel" : "Open AI picks panel"}
+        className="inline-flex items-center gap-2 rounded-[var(--radius-pill)] px-4 py-2 text-sm font-medium shadow-lg transition-all hover:brightness-110 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[color:var(--color-qk-primary)]"
         style={{
           background: "var(--color-qk-coin)",
           color: "var(--color-qk-fg)",

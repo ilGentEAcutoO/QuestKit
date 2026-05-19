@@ -1,0 +1,9 @@
+{
+  "label": "API Reference",
+  "position": 9,
+  "link": {
+    "type": "generated-index",
+    "description": "Every REST endpoint with curl examples and JSON responses."
+  },
+  "collapsed": false
+}
