@@ -1,0 +1,70 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // Test-only wrangler config — identical to wrangler.jsonc EXCEPT the `ai`
+  // binding is omitted. Workers AI has no local emulator; pool-workers 0.16
+  // tries to open a remote-proxy session against the real Cloudflare API,
+  // which fails in CI without CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_API_TOKEN
+  // secrets. Until TASK-017 lands AI recommendations, no test depends on
+  // env.AI — dropping the binding here is the cleanest workaround.
+  //
+  // When TASK-017 ships, either (a) add CF credentials to CI and bring the
+  // binding back here, or (b) gate the AI-using tests with a `describe.skipIf`
+  // that checks for credential presence.
+  "name": "questkit-worker-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-05-19",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "questkit-d1-main",
+      "database_id": "<set-per-env>"
+    }
+  ],
+
+  "kv_namespaces": [
+    {
+      "binding": "CACHE",
+      "id": "<set-per-env>"
+    }
+  ],
+
+  "r2_buckets": [
+    {
+      "binding": "ASSETS_R2",
+      "bucket_name": "questkit-r2-assets"
+    }
+  ],
+
+  "queues": {
+    "producers": [
+      {
+        "binding": "WEBHOOK_QUEUE",
+        "queue": "questkit-queue-webhooks"
+      }
+    ]
+  },
+
+  "durable_objects": {
+    "bindings": [
+      { "name": "RATE_LIMITER", "class_name": "RateLimiter" },
+      { "name": "SSE_HUB", "class_name": "SSEHub" }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["RateLimiter", "SSEHub"]
+    }
+  ],
+
+  "analytics_engine_datasets": [
+    {
+      "binding": "EVENTS_AE",
+      "dataset": "questkit_events"
+    }
+  ]
+  // NOTE: no `ai` binding here — see header comment.
+}

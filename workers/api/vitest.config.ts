@@ -49,11 +49,12 @@ const TEST_WEBHOOK_HMAC_SECRET =
 export default defineConfig({
   plugins: [
     cloudflareTest({
-      // wrangler.jsonc supplies the bindings (D1=DB, KV=CACHE, etc.) so the
-      // test runtime mirrors production exactly. We deliberately point at the
-      // public config (placeholder IDs) — pool-workers patches in
-      // miniflare-managed equivalents so the placeholder strings are harmless.
-      wrangler: { configPath: "./wrangler.jsonc" },
+      // wrangler.test.jsonc mirrors production (wrangler.jsonc) MINUS the
+      // `ai` binding. Workers AI has no local emulator; pool-workers 0.16
+      // tries to open a remote-proxy session which fails in CI without
+      // CLOUDFLARE_API_TOKEN. No current test uses env.AI (lands in TASK-017),
+      // so the cleanest CI-compatible workaround is to omit it here.
+      wrangler: { configPath: "./wrangler.test.jsonc" },
       miniflare: {
         // `bindings` is the miniflare-level name for env vars / secrets. They
         // appear on c.env at runtime exactly like a `wrangler.toml` [vars]
