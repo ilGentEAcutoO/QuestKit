@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "rootDir": ".",
+    "types": ["jest", "node"],
+    "noEmit": true,
+    "outDir": "./dist"
+  },
+  "include": ["src/**/*", "test/**/*", "tsdown.config.ts", "jest.config.cjs"]
+}

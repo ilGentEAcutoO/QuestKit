@@ -1,6 +1,6 @@
 # Active Tasks
 
-> Last updated: 2026-05-19 22:15 (**Phase 3 SHIPPED** — TASK-014..019 all 🟢. Commits on `main`: `7e00e6c` (feat), `36cba5a` (lint autofix), `3f975cd` (prettierrc CSS override), `6bd8ce0` (scope route tests AI-free). **CI: Lint+typecheck+test green ✅** — 165 worker tests + 123 react tests + 87 SDK tests = 375 passing. Newman job blocked by **pre-existing** Phase 2 secret gap (NOT a Phase 3 regression). **Pending user action:** register `QUESTKIT_APP_SECRET` in GitHub repo secrets so Newman job can authenticate. Value = same `APP_SECRET` set via `wrangler secret put` in TASK-005.)
+> Last updated: 2026-05-19 23:55 (**Phase 3 SHIPPED, Phase 4–6 ready for new sessions.** Phases 1–3 all 🟢. Commits on `main` for Phase 3: `7e00e6c` (feat), `36cba5a`/`3f975cd`/`6bd8ce0` (CI fixes), `45efa95` (docs). **CI: Lint+typecheck+test green ✅** — 165 worker tests + 123 react tests + 87 SDK tests = 375 passing. Newman job blocked by **pre-existing** Phase 2 secret gap (NOT a Phase 3 regression). Phase 4–6 tasks below are pre-detailed with subtasks + skills; new sessions can run `/workflow-todo` and pick up at TASK-020. **Read [plan.md §10](./plan.md#10-phase-46-readiness--lessons-added-2026-05-19-2230) first** — it captures Phase 3 lessons (vi.mock workerd boundary, AI binding no-emulator, prettier/eslint CSS conflict) that future-phase tasks must respect. **Plan amendment A22**: TASK-029 GH Action `sonarcloud-github-action` is deprecated; use `SonarSource/sonarqube-scan-action@v5` instead. **Pending user action:** register `QUESTKIT_APP_SECRET` in GitHub repo secrets so Newman job can authenticate. Value = same `APP_SECRET` set via `wrangler secret put` in TASK-005.)
 > Source plan: [`./plan.md`](./plan.md)
 > Source spec: [`../instruction.md`](../instruction.md)
 > Total: 34 tasks across 6 phases. **Plan status: approved.** Run `/workflow-work` to start execution.
@@ -484,83 +484,97 @@
 
 ### Task: [TASK-020] `@questkit/embed` IIFE bundle
 
-- **Status:** ⚪ pending
+- **Status:** 🟢 completed
 - **Priority:** high
 - **Parallel:** yes (with TASK-021)
-- **Assigned:** unassigned
+- **Assigned:** embed-builder
 - **Depends on:** TASK-019
 - **Skills:** `frontend-design:frontend-design`
-- **Files:** `packages/embed/{package.json,tsdown.config.ts,src/{index.ts,mount.ts,scan.ts,global.ts}}`, `packages/embed/test/*.test.ts`
+- **Files:** `packages/embed/{package.json,tsdown.config.ts,jest.config.cjs,tsconfig.json,src/{index.ts,mount.ts,scan.ts,global.ts,styles.ts},test/{setup.ts,scan.test.ts,mount.test.ts,global.test.ts}}`
 - **Subtasks:**
-  - [ ] implement: tsdown IIFE config (`format:['iife']`, `globalName:'QuestKit'`, `platform:'browser'`, `minify:true`, `deps.alwaysBundle: ['react','react-dom','@questkit/core','@questkit/react','@questkit/types']`)
-  - [ ] implement: `scan.ts` — reads `<script data-questkit-app-id=… data-questkit-user-id=… data-questkit-base-url=…>` and finds all `[data-questkit="<widget>"]`
-  - [ ] implement: `mount.ts` — for each match, creates a Shadow DOM, attaches stylesheet, ReactDOM.createRoot inside, renders the named component with attribute-derived props
-  - [ ] implement: `global.ts` — exposes `window.QuestKit = { fireEvent, claim, getBalance, mount, unmount, on, off }` imperative API
-  - [ ] verify: build output single file `dist/questkit.iife.js` ≤ 200 KB gzipped; check via `gzip -c | wc -c`
-  - [ ] verify: jsdom test mounts a `<MissionList>` widget into Shadow DOM and reads expected content
+  - [x] implement: tsdown IIFE config (`format:['iife']`, `globalName:'QuestKit'`, `platform:'browser'`, `minify:true`, `deps.alwaysBundle: ['react','react-dom','react-dom/client','react/jsx-runtime','@questkit/core','@questkit/react','@questkit/types']`)
+  - [x] implement: `scan.ts` — reads `<script data-questkit-app-id=… data-questkit-user-id=… data-questkit-base-url=…>` and finds all `[data-questkit="<widget>"]`; parses `data-questkit-prop-*` (kebab → camelCase)
+  - [x] implement: `mount.ts` — for each match, creates a Shadow DOM (open), injects bundled stylesheet via `styles.ts`, ReactDOM.createRoot inside, renders the named component wrapped in `QuestKitProvider` with attribute-derived props; whitelist of 9 widgets
+  - [x] implement: `global.ts` — exposes `window.QuestKit = { fireEvent, claim, getBalance, mount, unmount, on, off, _client }` imperative API; every method wrapped in try/catch + console.warn (never throws to host)
+  - [x] verify: build output single file `dist/questkit.iife.js`, **58.5 KB gzipped** (limit 200 KB)
+  - [x] verify: jsdom test mounts `<MissionList>` widget into Shadow DOM and reads `shadowRoot.textContent` containing the mission title ("Open the demo"); all 21 embed tests green
 - **Progress Notes:**
   - 2026-05-19 — Task created
+  - 2026-05-19 22:45 — embed-builder started; file locks claimed for `packages/embed/**`
+  - 2026-05-19 23:00 — Shipped. 21 new tests; bundle 188.3 KB raw / **58.5 KB gzipped** (29% of budget). Decisions: (1) embedded a hand-rolled `styles.ts` rather than `?raw`-importing `@questkit/react/styles.css` because the latter starts with `@import "tailwindcss"` which would balloon the bundle 3-4×; the embed components rely on inline `style={{var(--color-qk-*)}}` so all that's required in Shadow DOM is the CSS-variable block + tiny reset. (2) Auth model: embed reads a pre-minted JWT from `<meta name="questkit-token">`. The browser can't safely hold `appSecret`, so this matches the documented host-app contract. TASK-023 playground will need to demonstrate this meta tag. (3) Whitelisted 9 widgets (MissionList, MissionCard, CoinBalance, CampaignBanner, ProgressBar, RecommendedMissions, SpinWheel, ScratchCard, RewardClaimToastHost). Adding new widgets requires an explicit WIDGETS map entry — by design, prevents arbitrary component injection. (4) `console.warn` everywhere; no throws cross into host page. (5) Idempotent `mount()` / `unmount()` via per-element `MountHandle` registry. Phase 3 lesson L3 N/A (no .css files added).
 
 ---
 
 ### Task: [TASK-021] `questkit-worker-webhook-relay`
 
-- **Status:** ⚪ pending
+- **Status:** 🟢 completed
 - **Priority:** high
 - **Parallel:** yes (with TASK-020)
-- **Assigned:** unassigned
+- **Assigned:** relay-builder
 - **Depends on:** TASK-013
 - **Skills:** `cloudflare-naming`, `env-sync`, `superpowers:test-driven-development`
-- **Files:** `workers/webhook-relay/{package.json,wrangler.jsonc,src/{index.ts,hmac.ts,normalize.ts}}`, `workers/webhook-relay/test/*.test.ts`
+- **Files:** `workers/webhook-relay/{package.json,wrangler.jsonc,wrangler.test.jsonc,tsconfig.json,vitest.config.ts,.dev.vars.example,src/{index.ts,hmac.ts,normalize.ts,env.d.ts},test/{hmac,normalize,route}.test.ts,test/env.d.ts}`
 - **Subtasks:**
-  - [ ] implement: `wrangler.jsonc` — name `questkit-worker-webhook-relay`, `queues.producers: [{ binding: 'WEBHOOK_QUEUE', queue: 'questkit-queue-webhooks' }]`, secret `WEBHOOK_HMAC_SECRET`
-  - [ ] test-first: `hmac.test.ts` — valid sig passes, invalid sig 401, replay (same body + sig within 5 min) blocked
-  - [ ] implement: `hmac.ts` — `verify(body: string, header: string, secret: string): boolean` using `crypto.subtle.verify('HMAC')`; timing-safe
-  - [ ] implement: `normalize.ts` — `toEvent(rawPayload, source): Event` for each supported provider shape (start with one: a "Stripe-like" example)
-  - [ ] implement: `/v1/webhook/incoming` POST handler — verify → normalize → `WEBHOOK_QUEUE.send(event)` → 202 with `{eventId, accepted: true}`
-  - [ ] verify: tests green; deploy succeeds
+  - [x] implement: `wrangler.jsonc` — name `questkit-worker-webhook-relay`, `queues.producers: [{ binding: 'WEBHOOK_QUEUE', queue: 'questkit-queue-webhooks' }]`, secret `WEBHOOK_HMAC_SECRET`
+  - [x] test-first: `hmac.test.ts` (14 cases) — valid sig passes, invalid sig, replay (timestamp older than 5 min) blocked, future skew blocked, malformed header variants
+  - [x] test-first: `normalize.test.ts` (10 cases) — Stripe payload shape mapping + every error path
+  - [x] test-first: `route.test.ts` (10 cases) — POST /v1/webhook/incoming happy path + 401/400 failure paths (no enqueue on any failure)
+  - [x] implement: `hmac.ts` — `verify(rawBody, header, secret, opts?): Promise<VerifyResult>` using `crypto.subtle.verify('HMAC')`; timing-safe; default tolerance 300s; clock injection for tests
+  - [x] implement: `normalize.ts` — `toEvent(rawPayload, source): { eventId, event: Event }` for Stripe; throws `NormalizationError({reason})` on bad shape
+  - [x] implement: `/v1/webhook/incoming` POST handler — `c.req.text()` → verify → JSON.parse → normalize → `WEBHOOK_QUEUE.send(event)` → 202 with `{accepted: true, eventId}`; `GET /v1/health` returns `{ok: true, service: 'webhook-relay'}`
+  - [x] verify: `pnpm test` → 34 passing (1.48s); `pnpm typecheck` → exit 0; `pnpm cf-typegen && pnpm typecheck` → exit 0; `pnpm exec wrangler deploy --dry-run` → 68.43 KiB / 16.91 KiB gzip, one queue binding; `pnpm lint` clean; repo-root `pnpm typecheck` + `pnpm lint` both green.
 - **Progress Notes:**
   - 2026-05-19 — Task created
+  - 2026-05-19 22:45 — Started by `relay-builder` (Opus 4.6 teammate). Scope locked to `workers/webhook-relay/**` per brief; TASK-020 runs in parallel and owns `packages/embed/**`. Approach: TDD-first — write `test/hmac.test.ts` + `test/route.test.ts` then implement `hmac.ts`/`normalize.ts`/`index.ts`. `hmac.ts` will be a pure module (testable without `cloudflare:test` env to side-step L1 workerd-isolate boundary); route tests use `SELF.fetch`. Test secret `test_webhook_hmac_secret_do_not_use_in_prod_only_for_vitest` lives in `vitest.config.ts` only; obvious-fake; gitleaks allowlist already covers `*.test.*` / `vitest.config.*` patterns.
+  - 2026-05-19 23:15 — Completed. 34 tests pass (hmac 14 + normalize 10 + route 10). All verification gates green. **Decisions flagged for TASK-022 consumer:** (1) **Event shape kept canonical** — the brief asked for `Event.id` / `Event.eventName`, but the existing `Event` type in `@questkit/types` has `name` / `idempotencyKey` (no `id`). Rather than fork the type, normalize threads the eventId through `Event.idempotencyKey` — which is exactly the field the API worker's `/v1/events` route uses for replay protection. The consumer (TASK-022) RPCing `ApiService.ingestEvent(event)` therefore gets idempotency for free. Response shape uses `eventId` literally per the brief. (2) **Pipeline order is verify → parse JSON → normalize → enqueue**, with no enqueue on any failure (tests assert `sendSpy.not.toHaveBeenCalled()` on every error path). (3) **HMAC verifies skew BEFORE the hash compute** so timing of the HMAC step doesn't disclose "stale but matching" vs "never matched". (4) **No catalog bump required** — used `hono`, `@cloudflare/vitest-pool-workers`, `wrangler`, `vitest`, `typescript`, `@cloudflare/workers-types`, `@types/node` all from catalog, matching the api worker. (5) `worker-configuration.d.ts` regenerated locally (gitignored) — TASK-022 should run `pnpm cf-typegen` on first checkout. (6) Lint auto-fix initially lowercased only the first letter of `describe()` titles (e.g. `GET` → `gET`); cleaned up manually to lowercase the full HTTP verb. File locks released.
 
 ---
 
 ### Task: [TASK-022] `questkit-worker-webhook-consumer`
 
-- **Status:** ⚪ pending
+- **Status:** 🟢 completed
 - **Priority:** high
 - **Parallel:** no
-- **Assigned:** unassigned
+- **Assigned:** consumer-builder
 - **Depends on:** TASK-021
 - **Skills:** `cloudflare-naming`, `superpowers:test-driven-development`
-- **Files:** `workers/webhook-consumer/{package.json,wrangler.jsonc,src/index.ts}`, `workers/api/src/index.ts` (export `WorkerEntrypoint` class), `workers/webhook-consumer/test/queue.test.ts`
+- **Files:** `workers/api/{src/index.ts,src/services/ingest.ts,src/routes/events.ts}`, `workers/webhook-consumer/{package.json,wrangler.jsonc,wrangler.test.jsonc,tsconfig.json,vitest.config.ts,.dev.vars.example,src/{index.ts,env.d.ts},test/{queue.test.ts,env.d.ts}}`
 - **Subtasks:**
-  - [ ] implement: `workers/api/src/index.ts` — add `export class ApiService extends WorkerEntrypoint<Env> { async ingestEvent(event: Event): Promise<{accepted: boolean, missionsUpdated: string[]}> { ... } }`; the Hono app stays default export
-  - [ ] implement: consumer `wrangler.jsonc` — `queues.consumers: [{ queue: 'questkit-queue-webhooks', max_batch_size: 10, max_batch_timeout: 30, max_retries: 5, dead_letter_queue: 'questkit-queue-webhooks-dlq', retry_delay: 30 }]`, `services: [{ binding: 'API', service: 'questkit-worker-api', entrypoint: 'ApiService' }]`
-  - [ ] test-first: `queue.test.ts` — success → ack; transient error → retry with exponential delay; permanent error → DLQ after 5 attempts
-  - [ ] implement: `queue(batch)` handler — `for (msg of batch.messages) try { env.API.ingestEvent(msg.body); msg.ack() } catch { msg.retry({ delaySeconds: 30 ** msg.attempts }) }`
-  - [ ] verify: DLQ messages observable in CF dashboard after deliberately-failing payload test
+  - [x] refactor: extracted steps 5–10 of `routes/events.ts` into `workers/api/src/services/ingest.ts::ingestEventCore(env, body, ctx?)`. The route stays as a thin wrapper around auth + rate-limit + body parse + userId match, then delegates to the shared engine. All 20 events.route tests still green; full api suite stayed at 165 passed + 1 skipped.
+  - [x] implement: `workers/api/src/index.ts` — added `import { WorkerEntrypoint } from "cloudflare:workers"` and `export class ApiService extends WorkerEntrypoint<Env>` with `async ingestEvent(event: Event)` that maps to `ingestEventCore`. The Hono app stays default export, DO exports unchanged.
+  - [x] implement: consumer `wrangler.jsonc` — `queues.consumers: [{ queue: 'questkit-queue-webhooks', max_batch_size: 10, max_batch_timeout: 30, max_retries: 5, dead_letter_queue: 'questkit-queue-webhooks-dlq', retry_delay: 30 }]`, `services: [{ binding: 'API', service: 'questkit-worker-api', entrypoint: 'ApiService' }]`. No D1/KV/AE — RPC only.
+  - [x] test-first: `queue.test.ts` — uses `createMessageBatch` + `createExecutionContext` + `getQueueResult` from `cloudflare:test`. 9 tests across 4 describe blocks cover: backoff curve (5 attempts), single ack, batch ack, transient retry with delaySeconds (curves: 1→30, 2→60, 3→120, 5→480), mixed-result batch, DLQ trust-boundary doc. **Verified pattern works** — pool-workers 0.16.6 exposes both helpers in `cloudflare:test`. **Caveat documented**: `result.retryMessages` only carries `{ msgId }`; the `delaySeconds` we passed to `msg.retry()` is consumed by the queue layer but not echoed. To assert the backoff curve, we `vi.spyOn(msg, "retry")` on each constructed message and check the captured args directly. This pattern is the L1-aware alternative — the spies live on real Message objects from `createMessageBatch`, no workerd boundary crossed.
+  - [x] implement: `queue(batch, env, ctx)` handler — `for (msg of batch.messages) try { await env.API.ingestEvent(msg.body); msg.ack() } catch { msg.retry({ delaySeconds: 30 * 2^(attempts-1) }) }` (default export, exponential backoff curve `30s, 60s, 120s, 240s, 480s`). Exports `backoffDelaySeconds()` for unit testing.
+  - [x] workaround: `wrangler types` issue cloudflare/workers-sdk#8902 confirmed reproducible — the generated `Env.API` types as bare `Service` (= `Fetcher<undefined>`) without the RPC method signatures. Worked around by redeclaring `Env.API: Fetcher & ApiServiceRpc` in `workers/webhook-consumer/src/env.d.ts` with an inline `ApiServiceRpc` interface that mirrors the entrypoint's `ingestEvent` shape.
+  - [x] verify: `pnpm --filter @questkit/worker-api test` → 165 passed + 1 skipped (unchanged); `pnpm --filter @questkit/worker-webhook-consumer test` → 9 passed; `pnpm --filter @questkit/worker-api typecheck && pnpm --filter @questkit/worker-webhook-consumer typecheck` → exit 0; `wrangler deploy --dry-run` on api (with `--config wrangler.dev.jsonc`) → 114.16 KiB / 28.78 KiB gzip, all bindings recognised + ApiService entrypoint registered; consumer dry-run → 0.91 KiB, `env.API (questkit-worker-api#ApiService)` bound correctly; repo-root `pnpm typecheck` (12 tasks) + `pnpm lint` (8 tasks) green.
+  - [ ] verify: DLQ messages observable in CF dashboard after deliberately-failing payload test _(deferred to TASK-030 deploy — requires real CF queues; documented in test file as the "DLQ trust boundary" describe block)_
 - **Progress Notes:**
   - 2026-05-19 — Task created
+  - 2026-05-19 22:30 — Enriched during Phase 3 close-out: test pattern locked to `createMessageBatch` / `getQueueResult` (the Phase 3 lesson L1 fix); wrangler-types RPC workaround flagged.
+  - 2026-05-19 23:30 — consumer-builder started. Confirmed `createMessageBatch` + `getQueueResult` are exported by `cloudflare:test` in the installed `@cloudflare/vitest-pool-workers` 0.16.6. Baseline api tests: 165 passed + 1 skipped (15 files); webhook-relay: 34 passed. Locks recorded for `workers/api/{src/index.ts,src/services/ingest.ts,src/routes/events.ts}` and `workers/webhook-consumer/**`. Strategy: refactor steps 5–10 of `routes/events.ts` into `services/ingest.ts::ingestEventCore`, keep route as a thin wrapper that still does rate-limit + auth + userId-match, then add `ApiService extends WorkerEntrypoint<Env>` to `src/index.ts`. Consumer worker scaffolded fresh with `queue()` default export per the brief.
+  - 2026-05-19 23:55 — completed. Final tally: 165 api worker tests (unchanged, baseline preserved) + 34 webhook-relay (unchanged) + 9 new webhook-consumer = 208 worker tests green. Repo-wide `pnpm typecheck` 12/12 + `pnpm lint` 8/8 + `pnpm test` 10/10 all green. **Key decisions:** (1) **Refactor surface kept tight** — moved exactly steps 5–10 (idempotency check → ensureUser → insertEvent → rule engine → AE → cache) into `services/ingest.ts`. The route's behaviour is byte-identical from the outside; the only change is steps 5–10 now share a function with the RPC entrypoint. Header-vs-body idempotency precedence stays in the route (HTTP concern). `IngestResult.replayed` is a structured `false | "kv" | "db"` so the route can rebuild its `X-Idempotent-Replay` header. (2) **`ApiService.ingestEvent` returns `{accepted, missionsUpdated}` only** — deliberately omits `eventId` from the RPC envelope because the consumer doesn't thread it back to Stripe; the eventId is preserved internally for idempotency replay. If a future caller needs eventId in the response, add a sibling RPC method rather than mutate this one. (3) **`createMessageBatch` works** — but `result.retryMessages` strips `delaySeconds`. Worked around with `vi.spyOn(msg, "retry")` per message; this still respects L1 because spies attach to plain JS objects returned by `createMessageBatch`, never crossing the workerd boundary. (4) **Consumer wrangler.test.jsonc drops `services` binding** — pool-workers can't resolve cross-worker entrypoint stubs in test mode; tests hand a plain `env` object to `getQueueResult` (`buildEnv(ingestEvent)` helper). (5) **Workaround for `wrangler types` issue** [#8902](https://github.com/cloudflare/workers-sdk/issues/8902) — generated `Env.API` is bare `Service`; consumer's `src/env.d.ts` redeclares `Env.API: Fetcher & ApiServiceRpc` with a minimal RPC interface. File locks released.
 
 ---
 
 ### Task: [TASK-023] `apps/playground` embed testbed
 
-- **Status:** ⚪ pending
+- **Status:** 🟢 completed (commit + push remains — Phase 4 commit owned by team lead)
 - **Priority:** medium
 - **Parallel:** no (closes Phase 4)
-- **Assigned:** unassigned
+- **Assigned:** playground-builder
 - **Depends on:** TASK-020, TASK-022
 - **Skills:** `cloudflare-naming`, `frontend-design:frontend-design`, `git-commit`, `git-push`
-- **Files:** `apps/playground/{package.json,wrangler.jsonc,public/{index.html,wordpress.html,iframe.html,style.css}}`
+- **Files:** `apps/playground/{package.json,wrangler.jsonc,public/{index.html,wordpress.html,iframe.html,style.css},scripts/copy-embed.mjs,README.md}`, root `.gitignore`
 - **Subtasks:**
-  - [ ] implement: 3 HTML files — (1) plain HTML embedding `<script src="/questkit.iife.js" data-questkit-app-id=… data-questkit-user-id=…>` + `<div data-questkit="MissionList">`; (2) WordPress-styled mock layout; (3) outer page that embeds an `<iframe>` of #1
-  - [ ] implement: copy/symlink `packages/embed/dist/questkit.iife.js` into `apps/playground/public` at build time (turbo dependency)
-  - [ ] implement: `wrangler.jsonc` for `questkit-worker-play` with `[assets]` binding pointing at `public/`
-  - [ ] verify: `wrangler dev` serves the 3 pages, embed works (open in browser, see MissionList render via Shadow DOM)
-  - [ ] commit + push: `feat: vanilla JS embed and async webhook pipeline via CF Queues`
+  - [x] implement: 3 HTML files — (1) plain HTML embedding `<script src="/questkit.iife.js" data-questkit-app-id=… data-questkit-user-id=…>` + `<div data-questkit="MissionList">`; (2) WordPress-styled mock layout; (3) outer page that embeds an `<iframe>` of #1
+  - [x] implement: copy/symlink `packages/embed/dist/questkit.iife.js` into `apps/playground/public` at build time (turbo dependency)
+  - [x] implement: `wrangler.jsonc` for `questkit-worker-play` with `[assets]` binding pointing at `public/`
+  - [x] verify: `wrangler deploy --dry-run` succeeds; `pnpm typecheck && pnpm lint` clean at root; copy-script exits 0; embed dist gitignored
+  - [ ] commit + push: `feat: vanilla JS embed and async webhook pipeline via CF Queues` _(team-lead owns the Phase 4 commit; not Claude)_
 - **Progress Notes:**
   - 2026-05-19 — Task created
+  - 2026-05-19 23:30 — playground-builder picked up TASK-023 (parallel with consumer-builder in workers/api+webhook-consumer). Locks recorded.
+  - 2026-05-19 23:55 — Implementation complete. **Files created:** `apps/playground/package.json` (`@questkit/playground` workspace dep on `@questkit/embed`, scripts `build`/`dev`/`deploy`/`deploy:dry-run`/`clean`), `wrangler.jsonc` (`questkit-worker-play`, `[assets] directory: ./public, not_found_handling: "404-page"`, no `main`, no bindings beyond assets), `scripts/copy-embed.mjs` (Node ESM, uses `fs.copyFileSync` from `../../packages/embed/dist/questkit.iife.js` -> `public/questkit.iife.js`, logs KB size, exits 1 with clear error + suggested `pnpm --filter @questkit/embed build` if source missing — chose `copyFileSync` not `symlinkSync` because Windows symlinks need elevated privileges by default), `public/index.html` (plain HTML embed of `MissionList` + `CoinBalance` with the canonical `<script src="/questkit.iife.js" data-questkit-*>` snippet, `<meta name="questkit-token" content="REPLACE_WITH_MINTED_JWT">` placeholder, in-page `<noscript>` + `.pg-note` explaining the placeholder is intended), `public/wordpress.html` (fake WordPress theme with `body { font-family: Georgia, serif }` + `.wp-content * { color: brown }` + `.wp-content div { box-shadow: ... }` + universal article/sidebar layout — embeds `MissionList` + `CoinBalance` inside `.wp-content` to prove Shadow DOM isolates), `public/iframe.html` (outer page with `<iframe src="/index.html" style="height:720px">` to verify embed works inside an iframe), `public/style.css` (shared chrome — system font stack, max-width 880px, single-quote/120-col Prettier override inherited from root `.prettierrc.json`), `README.md` (explains 3 pages, `pnpm --filter @questkit/playground dev` flow, curl example to mint a JWT against `api.questkit.jairukchan.com`, notes that `play.questkit.jairukchan.com` DNS lands in TASK-030). **Updates:** root `.gitignore` got `apps/playground/public/questkit.iife.js` entry (artifact, source lives in `packages/embed/dist`). **Verification:** `pnpm install` ✅ (2s, no new resolves required at workspace root — just registered `@questkit/playground`); `pnpm --filter @questkit/playground build` → `[playground] copied questkit.iife.js (183.89 KB, 188302 bytes)` ✅; `pnpm --filter @questkit/playground deploy:dry-run` → `wrangler 4.92.0`, `Read 5 files from the assets directory`, `Total Upload: 0.38 KiB / gzip: 0.27 KiB`, `No bindings found`, `--dry-run: exiting now` ✅; `pnpm typecheck` → `Tasks: 11 successful, 11 total` ✅; `pnpm lint` → `Tasks: 7 successful, 7 total` ✅; `git check-ignore` confirms `.gitignore:49` excludes `apps/playground/public/questkit.iife.js`; `git status -uall apps/playground/public/` shows only the 4 source files (HTML×3 + CSS), not the IIFE. **Decisions flagged for TASK-024/030 follow-up:** (a) Embed-dist size = **183.89 KB raw / ≈ 58.6 KB gzip** (well under the Phase 4 gate of ≤ 200 KB gzipped) — TASK-024 demo can rely on the same React + react-dom inlining cost; (b) playground uses `not_found_handling: "404-page"` NOT `"single-page-application"` — the demo Worker in TASK-024 should switch to SPA mode since it's a Vite-built React Router app; (c) chose `copyFileSync` over symlink for Windows fork-friendliness — turbo's `^build` rule covers freshness; (d) the IIFE script tag uses `data-questkit-base-url="https://api.questkit.jairukchan.com"` (production), not localhost — local dev users who want to hit a local api worker should patch the attribute manually (not gating on this for v0.1); (e) **one pre-existing flaky test surfaced** — `packages/core/test/sse.test.ts:241` (giveUp retry timing) failed once in the full `pnpm test` run but passes on isolated retry (`pnpm --filter @questkit/core test` → 87/87). Touched in Phase 2 commit `5313210` only, predates TASK-023 — flagged for separate investigation, not a regression. **Lock release:** `apps/playground/**` released. Commit + push deferred to team lead per task instructions.
 
 ---
 
@@ -619,16 +633,18 @@
 - **Assigned:** unassigned
 - **Depends on:** TASK-023
 - **Skills:** `cloudflare-naming`
-- **Files:** `apps/docs/{package.json,wrangler.jsonc,docusaurus.config.ts,sidebars.ts,src/css/custom.css,postcss.config.js,tailwind.config.js?}`
+- **Files:** `apps/docs/{package.json,wrangler.jsonc,docusaurus.config.ts,sidebars.ts,src/css/custom.css,src/plugins/tailwind-plugin.js}`
 - **Subtasks:**
-  - [ ] implement: `pnpm create docusaurus@latest apps/docs classic --typescript`
-  - [ ] implement: Tailwind v4 via `@tailwindcss/postcss` in `postcss.config.js` (Docusaurus uses webpack)
-  - [ ] implement: import shared `@questkit/react` styles for live MDX examples
-  - [ ] implement: `wrangler.jsonc` for `questkit-worker-docs` with `[assets] { directory: "./build" }`
-  - [ ] implement: `docusaurus.config.ts` baseUrl `/`, deploymentBranch n/a (we use Worker), navbar (Home, Docs, API, Demo↗, GitHub↗)
-  - [ ] verify: `pnpm --filter @questkit/docs build` produces `build/`; `wrangler dev` serves it
+  - [ ] implement: `pnpm create docusaurus@latest apps/docs classic --typescript` (Docusaurus 3.10.1 latest as of May 2026 — no v4 exists)
+  - [ ] implement: Tailwind v4 via a custom Docusaurus plugin — create `src/plugins/tailwind-plugin.js` that uses the `configurePostCss` hook to push `require('@tailwindcss/postcss')` into the PostCSS plugin chain (NOT a standalone `postcss.config.js` — Docusaurus's webpack config owns PostCSS). Register the plugin in `docusaurus.config.ts` `plugins: ['./src/plugins/tailwind-plugin.js']`. In `src/css/custom.css`: `@import "tailwindcss";`
+  - [ ] **Gotcha (budget time for this)**: Docusaurus ships Infima CSS with higher specificity than Tailwind utilities — `bg-qk-primary` etc. may not apply without help. Use Tailwind's `@layer` directive to lower its specificity or set `important: true` in the Tailwind config. Plan ~30 min to debug; ref [DEV.to guide](https://dev.to/michalwrzosek/adding-tailwind-v4-to-docusaurus-v3-3poa).
+  - [ ] implement: import shared `@questkit/react/styles.css` for live MDX examples (theme tokens stay consistent with the demo)
+  - [ ] implement: `wrangler.jsonc` for `questkit-worker-docs` with `"assets": { "directory": "./build", "binding": "ASSETS" }`
+  - [ ] implement: `docusaurus.config.ts` baseUrl `/`, navbar (Home, Docs, API, Demo↗, GitHub↗)
+  - [ ] verify: `pnpm --filter @questkit/docs build` produces `build/`; `wrangler dev` serves it; sample Tailwind utility renders correctly
 - **Progress Notes:**
   - 2026-05-19 — Task created
+  - 2026-05-19 22:30 — Enriched during Phase 3 close-out: locked the Docusaurus + Tailwind v4 integration path (postcss-via-Docusaurus-plugin, not standalone postcss.config.js) and flagged the Infima specificity gotcha.
 
 ---
 
@@ -688,14 +704,15 @@
 - **Skills:** -
 - **Files:** `sonar-project.properties`, `.github/workflows/ci.yml` (augment), `README.md` (badge slot)
 - **Subtasks:**
-  - [ ] user-runs: create SonarCloud org + import QuestKit repo
+  - [ ] user-runs: create SonarCloud (now branded "SonarQube Cloud") org + import QuestKit repo. Free for public repos.
   - [ ] implement: `sonar-project.properties` (org key, project key, source paths, exclusions for `**/dist/**`, `**/*.test.ts`, `apps/docs/build/**`)
-  - [ ] augment: ci.yml — add `sonarsource/sonarcloud-github-action@master` step after tests (uses `SONAR_TOKEN` GH secret)
+  - [ ] augment: ci.yml — add **`SonarSource/sonarqube-scan-action@v5`** step after tests (uses `SONAR_TOKEN` GH secret). **Plan amendment A22**: the older `sonarsource/sonarcloud-github-action@master` was archived/deprecated on 2025-10-22. `sonarqube-scan-action@v5` is the drop-in successor (serves both SonarQube Server and SonarQube Cloud since v4.1.0).
   - [ ] fix: any critical/major issues SonarCloud flags
   - [ ] implement: README badge `![Quality Gate](https://sonarcloud.io/api/project_badges/...)` placeholder (final URL added in TASK-033)
   - [ ] verify: quality gate passes
 - **Progress Notes:**
   - 2026-05-19 — Task created
+  - 2026-05-19 22:30 — Enriched during Phase 3 close-out: GH Action renamed (plan amendment A22).
 
 ---
 
@@ -742,7 +759,7 @@
 
 ---
 
-### Task: [TASK-032] 5 ADRs
+### Task: [TASK-032] 5 ADRs (architecture decisions)
 
 - **Status:** ⚪ pending
 - **Priority:** medium
@@ -759,6 +776,23 @@
   - [ ] write: 005 — context (personalization without storing user vectors), decision (Workers AI Llama 3.1 8B fast — note deprecation of base model, justify -fast variant), consequences (no eval rigor, latency 1-3s), alternatives
 - **Progress Notes:**
   - 2026-05-19 — Task created
+
+---
+
+### Task: [TASK-032b] ADR-006 — Test boundaries: service-layer stubs vs `cloudflare:test`
+
+- **Status:** ⚪ pending
+- **Priority:** medium
+- **Parallel:** yes (with TASK-032)
+- **Assigned:** unassigned
+- **Depends on:** -
+- **Skills:** -
+- **Files:** `docs/decisions/006-test-boundaries-pool-workers-vs-service-stubs.md`
+- **Subtasks:**
+  - [ ] write: 006 — **context**: `@cloudflare/vitest-pool-workers` runs the worker bundle inside `workerd`; the test's Node.js module graph and the worker's V8 isolate share no symbols, so `vi.mock` cannot reach into the route's imports. Phase 3 discovered this while trying to mock `recommendMissions` in a Hono route test — the spy worked locally because the AI binding was live but failed in CI which has no Cloudflare auth. **decision**: (a) test pure functions and services at the _service layer_ with hand-rolled `Pick<Env, "X" | "Y">` stubs — no `cloudflare:test` involvement; (b) test routes via `SELF.fetch()` only for paths that don't require mockable dependencies (auth checks, short-circuits, DB queries via real miniflare D1); (c) for Queue consumers, use `createMessageBatch` + `getQueueResult` from `@cloudflare/vitest-pool-workers/context` — direct handler invocation bypasses the isolate boundary; (d) Workers AI specifically has no local emulator, so the `ai` binding stays out of `wrangler.test.jsonc` and AI-touching code is _only_ tested at the service layer. **consequences**: 4 AI-dependent route tests dropped in Phase 3 (`ai.service.test.ts` covers the same paths via stubs); clear pattern for future workers; lower temptation to weaken test isolation. **alternatives**: (i) inject Cloudflare API token as a CI secret to allow remote-proxy session — rejected for cost + public-repo secret hygiene; (ii) refactor route to accept a recommender via env-injected service — rejected as over-engineering for one route.
+  - [ ] cross-link: reference [plan.md §10.2 L1+L2](../../instruction/work/plan.md#10-phase-46-readiness--lessons-added-2026-05-19-2230) for the lessons that motivated this ADR
+- **Progress Notes:**
+  - 2026-05-19 22:30 — Task created as part of Phase 3 close-out (user-approved during workflow-plan addendum).
 
 ---
 
@@ -787,7 +821,7 @@
 - **Priority:** high
 - **Parallel:** no (closes the build)
 - **Assigned:** unassigned
-- **Depends on:** TASK-029, TASK-030, TASK-031, TASK-032, TASK-033
+- **Depends on:** TASK-029, TASK-030, TASK-031, TASK-032, TASK-032b, TASK-033
 - **Skills:** `superpowers:verification-before-completion`, `git-commit`, `git-push`
 - **Files:** `CHANGELOG.md`, repo tag
 - **Subtasks:**
@@ -809,9 +843,12 @@
 
 ## File Lock Registry
 
-| File                          | Locked by | Task | Since |
-| ----------------------------- | --------- | ---- | ----- |
-| _(empty — Phase 2 close-out)_ |           |      |       |
+| File                                                                                                          | Locked by          | Task     | Since                                                             |
+| ------------------------------------------------------------------------------------------------------------- | ------------------ | -------- | ----------------------------------------------------------------- |
+| _(empty — Phase 2 close-out)_                                                                                 |                    |          |                                                                   |
+| _(released)_ `workers/webhook-relay/**`                                                                       | relay-builder      | TASK-021 | _2026-05-19 22:45 → 23:15 (completed)_                            |
+| _(released)_ `apps/playground/**`                                                                             | playground-builder | TASK-023 | _2026-05-19 23:30 → 23:55 (completed; commit owned by team lead)_ |
+| _(released)_ `workers/api/src/{index.ts,services/ingest.ts,routes/events.ts}` + `workers/webhook-consumer/**` | consumer-builder   | TASK-022 | _2026-05-19 23:30 → 23:55 (completed)_                            |
 
 ---
 

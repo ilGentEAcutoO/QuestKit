@@ -1,0 +1,19 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // Test-only wrangler config — pool-workers stubs the queue producer so no
+  // real queue is touched. Mirrors wrangler.jsonc minus account-specific bits.
+  "name": "questkit-worker-webhook-relay",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-05-19",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+
+  "queues": {
+    "producers": [
+      {
+        "binding": "WEBHOOK_QUEUE",
+        "queue": "questkit-queue-webhooks"
+      }
+    ]
+  }
+}

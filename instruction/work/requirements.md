@@ -36,6 +36,20 @@ the authoritative spec for QuestKit. All planning derives from that file.
   → Naming: `questkit-worker-demo`, `questkit-worker-docs`, `questkit-worker-play` replace
   the `questkit-pages-*` names from the earlier Q&A.
 
+- **2026-05-19 22:30** — User invoked `/workflow-plan add phase 4 to plan ฉันจะเริ่ม sessions ใหม่ รวมถึง phase ที่เหลือทั้งหมดด้วยนะ`
+  ("Add Phase 4 to plan. I'll start new sessions, including all remaining phases.")
+  → Phase 3 shipped; user will resume Phases 4–6 in fresh sessions.
+  → **Plan addendum §10** added to `plan.md` capturing Phase 3 lessons + Phase 4–6 tech
+  validation. User-approved during the Q&A: (a) lessons live in `plan.md §10` (single
+  source of truth) over a separate handoff.md or ADR; (b) the testing-architecture
+  decision is _also_ captured as ADR-006 via new TASK-032b — permanent record for
+  future contributors.
+  → **Plan amendment A22**: SonarSource archived `sonarcloud-github-action` on 2025-10-22.
+  TASK-029 swapped to `SonarSource/sonarqube-scan-action@v5` (drop-in successor).
+  → Phase 4–6 todos.md entries enriched with Phase 3 lessons (TASK-022 queue test
+  pattern, TASK-026 Tailwind+Infima specificity, TASK-029 action rename). Existing
+  tasks otherwise unchanged.
+
 ## Top-level success criteria (from spec §13)
 
 1. A recruiter lands on the README and within 30 seconds wants to click the demo link.

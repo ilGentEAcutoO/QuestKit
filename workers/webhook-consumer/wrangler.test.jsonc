@@ -1,0 +1,17 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // Test-only wrangler config. We intentionally DROP the `services` binding
+  // here — pool-workers can't resolve a sibling worker reference inside the
+  // test miniflare instance. Our queue tests inject a fake `env.API` directly
+  // via plain JS object, mirroring the L1-aware pattern from plan §10.2: pass
+  // a stub on the env literal handed to `getQueueResult`, never `vi.mock`.
+  //
+  // We also omit the `queues.consumers` block. `createMessageBatch` +
+  // `getQueueResult` invoke the handler directly with a synthesised batch —
+  // no queue infrastructure is required at the wrangler level.
+  "name": "questkit-worker-webhook-consumer",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-05-19",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true }
+}

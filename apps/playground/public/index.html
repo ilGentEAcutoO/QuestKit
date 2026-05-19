@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>QuestKit Embed — Plain HTML Test</title>
+    <meta name="questkit-token" content="REPLACE_WITH_MINTED_JWT" />
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <nav class="pg-nav">
+      <a href="/index.html">Plain HTML</a>
+      <a href="/wordpress.html">WordPress mock</a>
+      <a href="/iframe.html">iframe context</a>
+    </nav>
+    <main>
+      <h1>Plain HTML embed test</h1>
+      <p class="muted">
+        Below: a <code>&lt;MissionList&gt;</code> widget injected into a Shadow DOM by
+        <code>/questkit.iife.js</code>. The script reads <code>data-questkit-*</code>
+        attributes off its own <code>&lt;script&gt;</code> tag at boot, then scans the document for
+        <code>[data-questkit]</code> elements and mounts each one.
+      </p>
+
+      <div class="pg-note">
+        <strong>Static testbed.</strong> The <code>&lt;meta name="questkit-token"&gt;</code> tag above is
+        intentionally a placeholder (<code>REPLACE_WITH_MINTED_JWT</code>). The playground is a
+        static-asset Worker for verifying that the IIFE bundle mounts widgets correctly in
+        real host-page contexts — it does not mint tokens itself. To exercise live API calls,
+        mint a JWT via <code>POST /v1/auth/token</code> on the api worker (see the README) and
+        paste it into this meta tag locally.
+      </div>
+
+      <noscript>
+        This page renders QuestKit widgets via the embed bundle, which requires JavaScript.
+        The bundle is a single IIFE under 200 KB gzipped that mounts widgets into Shadow DOM.
+      </noscript>
+
+      <h2>MissionList</h2>
+      <div class="pg-card">
+        <div data-questkit="MissionList"></div>
+      </div>
+
+      <hr />
+
+      <h2>CoinBalance</h2>
+      <div class="pg-card">
+        <div data-questkit="CoinBalance"></div>
+      </div>
+
+      <p class="muted">
+        Both widgets above are isolated by Shadow DOM — host page CSS (the <code>style.css</code>
+        loaded for this page) cannot reach inside their roots. See
+        <a href="/wordpress.html">/wordpress.html</a> for the same widgets embedded inside an
+        intentionally hostile WordPress-themed layout.
+      </p>
+    </main>
+
+    <script
+      src="/questkit.iife.js"
+      data-questkit-app-id="playground-demo"
+      data-questkit-user-id="usr_demo"
+      data-questkit-base-url="https://api.questkit.jairukchan.com"
+    ></script>
+  </body>
+</html>

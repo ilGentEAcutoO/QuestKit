@@ -2,14 +2,64 @@
   "name": "@questkit/embed",
   "type": "module",
   "version": "0.1.0",
-  "description": "QuestKit vanilla JS IIFE embed bundle (placeholder — populated in TASK-020).",
+  "description": "QuestKit vanilla JS IIFE embed — drop a <script> into any site, render widgets via Shadow DOM.",
   "license": "MIT",
-  "publishConfig": {
-    "access": "public"
-  },
+  "homepage": "https://github.com/ilGentEAcutoO/QuestKit/tree/main/packages/embed#readme",
   "repository": {
     "type": "git",
     "url": "https://github.com/ilGentEAcutoO/QuestKit.git",
     "directory": "packages/embed"
+  },
+  "bugs": {
+    "url": "https://github.com/ilGentEAcutoO/QuestKit/issues"
+  },
+  "keywords": [
+    "questkit",
+    "gamification",
+    "embed",
+    "iife",
+    "cloudflare"
+  ],
+  "sideEffects": false,
+  "exports": {
+    "./questkit.iife.js": "./dist/questkit.iife.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "test": "jest",
+    "test:coverage": "jest --coverage",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "clean": "rimraf dist .turbo coverage"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@questkit/core": "workspace:^",
+    "@questkit/react": "workspace:^",
+    "@questkit/types": "workspace:^",
+    "react": "catalog:",
+    "react-dom": "catalog:"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "catalog:",
+    "@testing-library/react": "catalog:",
+    "@types/jest": "catalog:",
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "identity-obj-proxy": "catalog:",
+    "jest": "catalog:",
+    "jest-environment-jsdom": "catalog:",
+    "rimraf": "^6.0.1",
+    "ts-jest": "catalog:",
+    "tsdown": "catalog:",
+    "typescript": "catalog:"
   }
 }

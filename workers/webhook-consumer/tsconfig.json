@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    // - @cloudflare/workers-types: Workers runtime globals (Request, MessageBatch, …)
+    // - node: required for vitest.config.ts module resolution.
+    "types": ["@cloudflare/workers-types/2023-07-01", "node"],
+    "noEmit": true,
+    "outDir": "dist"
+  },
+  "include": [
+    "src/**/*",
+    "test/**/*",
+    "vitest.config.ts",
+    "worker-configuration.d.ts"
+  ],
+  "exclude": ["node_modules", "dist", ".wrangler"]
+}

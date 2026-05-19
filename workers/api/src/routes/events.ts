@@ -7,12 +7,10 @@
  *   2. Rate-limiter DO check      → 200 allow, 429 reject (with Retry-After)
  *   3. Body validation            → 400 invalid_event on any failure
  *   4. userId match check         → 403 user_mismatch if body.userId !== JWT sub
- *   5. Idempotency check          → KV hit → return cached response w/ X-Idempotent-Replay
- *   6. ensureUser                 → idempotent INSERT into users
- *   7. insertEvent                → D1 INSERT; UNIQUE constraint → D1-replay fallback
- *   8. evaluateEvent (rules)      → TASK-009's evaluator returns MissionProgress[]
- *   9. writeEventDataPoint (AE)   → fire-and-forget telemetry
- *  10. putCached if idem key set  → store full response body for 24h
+ *   5–10. ingestEventCore         → idempotency → ensureUser → insertEvent →
+ *                                    rule engine → AE → cache. See
+ *                                    `services/ingest.ts` for the shared pipeline
+ *                                    that the queue consumer also calls via RPC.
  *  11. Return 200                 → { accepted, eventId, missionsUpdated[] }
  *
  * Response shape (locked):
@@ -25,28 +23,16 @@
  * field `idempotencyKey` when both are present. RFC 9530 (draft) treats the
  * header as canonical and several SDKs default to using only the header.
  *
- * Coordination with TASK-009 (teammate A): we import `evaluateEvent` from
- * `../rules`, passing missions fetched via `listMissions` verbatim. The
- * locked contract is:
- *
- *   evaluateEvent(db, event, candidateMissions): Promise<MissionProgress[]>
- *
- * A's evaluator must not assume any field projection — missions arrive
- * exactly as `rowToMission` returns them.
+ * TASK-022 refactor note: steps 5–10 used to live inline here; they were
+ * extracted into `services/ingest.ts::ingestEventCore` so the webhook-consumer
+ * worker can share the same engine via `WorkerEntrypoint` RPC. The route still
+ * owns auth, rate-limit, body validation, and userId match — those are
+ * HTTP-only concerns the trusted RPC path skips.
  */
-import type { Event } from "@questkit/types";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { requireAuth } from "../auth/middleware";
-import {
-  ensureUser,
-  getEventByIdemKey,
-  insertEvent,
-  listMissions,
-} from "../db/schema";
-import { evaluateEvent } from "../rules";
-import { writeEventDataPoint } from "../services/ae";
-import * as idem from "../services/idempotency";
+import { ingestEventCore } from "../services/ingest";
 
 interface EventsVars {
   userId: string;
@@ -189,101 +175,37 @@ events.post("/", async (c) => {
       ? headerKey
       : body.idempotencyKey;
 
-  // Step 5: idempotency cache check (primary defence).
-  if (effectiveIdemKey !== undefined) {
-    const cached = await idem.getCached<EventsResponse>(
-      c.env.CACHE,
+  // Steps 5–10: shared engine. The route owns request-level wiring (the
+  // idempotency header resolution above + the AE country lookup below); the
+  // service owns the database + KV + AE machinery so the queue consumer can
+  // reuse it via RPC.
+  const cf = c.req.raw.cf as { country?: string } | undefined;
+  const result = await ingestEventCore(
+    c.env,
+    {
       userId,
-      effectiveIdemKey,
-    );
-    if (cached !== null) {
-      // Cache HIT — return cached response with replay header.
-      return c.json(cached, 200, { "x-idempotent-replay": "hit" });
-    }
-  }
-
-  // Step 6: ensure the user row exists (FK for events / mission_progress).
-  await ensureUser(c.env.DB, userId);
-
-  // Step 7: insert the event row. UUIDv4 for the primary id.
-  const eventId = crypto.randomUUID();
-  const eventToInsert: Event = {
-    userId,
-    name: body.name,
-    payload: body.payload,
-    timestamp: body.timestamp,
-    ...(effectiveIdemKey !== undefined
-      ? { idempotencyKey: effectiveIdemKey }
-      : {}),
-  };
-  try {
-    await insertEvent(c.env.DB, { ...eventToInsert, id: eventId });
-  } catch (err) {
-    // Per TASK-006 note (b): treat a UNIQUE constraint violation on the
-    // partial-unique index `idx_events_user_idem` the same as a KV cache
-    // hit — fetch the prior event, rebuild the response, cache it for
-    // future calls.
-    if (
-      effectiveIdemKey !== undefined &&
-      err instanceof Error &&
-      /UNIQUE constraint|constraint failed/i.test(err.message)
-    ) {
-      const prior = await getEventByIdemKey(c.env.DB, userId, effectiveIdemKey);
-      if (prior !== null) {
-        // Rebuild a response from the prior event row. We can't replay the
-        // rule engine here (the original missionsUpdated computation is lost
-        // — D1 doesn't journal it). Best-effort: return an empty array. This
-        // matches the contract because the FIRST call already broadcast its
-        // updates; this call is a no-op replay.
-        const replay: EventsResponse = {
-          accepted: true,
-          eventId: prior.id,
-          missionsUpdated: [],
-        };
-        await idem.putCached(c.env.CACHE, userId, effectiveIdemKey, replay);
-        return c.json(replay, 200, { "x-idempotent-replay": "db-hit" });
-      }
-    }
-    throw err;
-  }
-
-  // Step 8: run the rule engine.
-  //
-  // ⚠️ TODO (TASK-010 follow-up): fetch-all-then-filter is fine for the 6
-  // seeded missions; for production we want a DB-side filter on
-  // `missions.criteria_json -> eventName = body.name` and possibly on
-  // `campaign window`. listMissions() doesn't expose those yet — TASK-010
-  // can add a `byEventName` / `activeNow` filter then.
-  const { missions: candidateMissions } = await listMissions(c.env.DB);
-  const updated = await evaluateEvent(
-    c.env.DB,
-    eventToInsert,
-    candidateMissions,
+      name: body.name,
+      payload: body.payload,
+      timestamp: body.timestamp,
+      ...(effectiveIdemKey !== undefined
+        ? { idempotencyKey: effectiveIdemKey }
+        : {}),
+    },
+    cf?.country !== undefined ? { requestCountry: cf.country } : {},
   );
 
-  // Step 9: AE write. Country comes from the underlying Request's cf object;
-  // undefined in test / local dev.
-  // `c.req.raw.cf` is typed as `IncomingRequestCfProperties | CfProperties`
-  // depending on context; reading `.country` (string | undefined) is safe.
-  // exactOptionalPropertyTypes is on, so we only set requestCountry when
-  // we actually have a value (otherwise omit the key entirely).
-  const cf = c.req.raw.cf as { country?: string } | undefined;
-  writeEventDataPoint(c.env.EVENTS_AE, eventToInsert, {
-    ...(cf?.country !== undefined ? { requestCountry: cf.country } : {}),
-    missionsMatched: updated.length,
-    nowMs: Date.now(),
-  });
-
-  // Step 10: build response, then cache if an idempotency key was provided.
-  const response: EventsResponse = {
+  const responseBody: EventsResponse = {
     accepted: true,
-    eventId,
-    missionsUpdated: updated.map((p) => p.missionId),
+    eventId: result.eventId,
+    missionsUpdated: result.missionsUpdated,
   };
-  if (effectiveIdemKey !== undefined) {
-    await idem.putCached(c.env.CACHE, userId, effectiveIdemKey, response);
+  if (result.replayed === "kv") {
+    return c.json(responseBody, 200, { "x-idempotent-replay": "hit" });
   }
-  return c.json(response, 200);
+  if (result.replayed === "db") {
+    return c.json(responseBody, 200, { "x-idempotent-replay": "db-hit" });
+  }
+  return c.json(responseBody, 200);
 });
 
 export default events;

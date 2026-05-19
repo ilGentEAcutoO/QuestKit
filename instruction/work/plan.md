@@ -377,3 +377,97 @@ Verbatim from spec §9 — **do not build in v0.1**:
 - ❌ **Any non-Cloudflare runtime service** (hard rule)
 
 Anything that arises during the build that isn't strictly required goes to `docs/ROADMAP.md` for v0.2.
+
+---
+
+## 10. Phase 4–6 Readiness & Lessons (Added: 2026-05-19 22:30)
+
+> This section was appended after Phase 3 shipped. Phases 1–3 are complete on `main`; Phases 4–6 begin in fresh sessions. The user explicitly asked that this content live in `plan.md` so any fresh session loading the plan inherits the full Phase 3 context without re-discovering its constraints.
+
+### 10.1 Phase 1–3 closeout snapshot
+
+| Phase               | Tasks         | Final commit                                                                 | Test counts                                     | Notes                                                                    |
+| ------------------- | ------------- | ---------------------------------------------------------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------ |
+| 1 — Foundation      | TASK-001..005 | `5313210` (precursor) → `b91b047`, `4398902`, `2b562c3` (CI fixes)           | n/a (scaffold)                                  | Worker shell deployed to `api.questkit.jairukchan.com`                   |
+| 2 — Core SDK + API  | TASK-006..013 | `5313210` (feat) + `fab8f29` (docs)                                          | 153 worker + 87 SDK                             | Worker version `56a4784b-0399-4e7a-9947-9c6bff3bc468` live               |
+| 3 — React + AI recs | TASK-014..019 | `7e00e6c` (feat), `36cba5a`/`3f975cd`/`6bd8ce0` (CI fixes), `45efa95` (docs) | 165 worker + 123 react + 87 SDK = **375 total** | `@questkit/react` v0.1.0 ready; AI route serving Encouraging Coach voice |
+
+**CI state on `main`:** `Lint, typecheck, test` ✅ green on `45efa95`. `Newman API contract tests` ❌ blocked on missing `QUESTKIT_APP_SECRET` GitHub secret (Phase 2 carry-over — see §10.3 step 1).
+
+### 10.2 Phase 3 lessons learned — apply forward
+
+Four hard-won discoveries from Phase 3. Each one re-bit us in CI and shaped concrete code. Carry them into Phases 4–6 without re-learning them.
+
+#### L1 — `vi.mock` cannot reach into the workerd isolate
+
+`@cloudflare/vitest-pool-workers` 0.16 compiles the worker bundle separately and runs it inside `workerd`. Test code in Node.js and worker code in workerd share **no module graph**, so `vi.mock("../src/services/foo")` in the test has zero effect on the route's import of the same path.
+
+**Consequence**: any route test that uses `SELF.fetch()` to invoke the live router will execute the _real_ implementation of every dependency. To stub a dependency you must either (a) make the call site receive an injected fake via `env`, or (b) test the dependency directly outside `cloudflare:test`.
+
+**Applied in Phase 3**: dropped 4 AI-dependent route tests from `recommendations.route.test.ts`; the same coverage lives in `ai.service.test.ts` against a hand-rolled `Pick<Env, "AI" | "CACHE">` stub.
+
+**Apply in Phase 4**:
+
+- TASK-022 webhook-consumer tests should use **`createMessageBatch` + `getQueueResult`** from `@cloudflare/vitest-pool-workers/context` (direct handler invocation — no workerd boundary crossed). This is the official Cloudflare-recommended pattern for queue tests as of May 2026. The path bypasses `vi.mock` entirely because you pass a plain JS object into a plain JS function.
+
+#### L2 — Workers AI has no local emulator; the binding is _always_ remote
+
+Declaring `"ai": { "binding": "AI" }` in any wrangler config opens a remote-proxy session at worker startup. In local dev this is fine if you've run `wrangler login`. **In CI without a Cloudflare API token, the worker cannot start.** Pool-workers fails before any test mock takes effect.
+
+**Applied in Phase 3**: removed the `ai` binding from `wrangler.test.jsonc`; AI-touching tests bypass `cloudflare:test` env entirely.
+
+**Apply in Phase 4–6**: no Phase 4 worker uses Workers AI, so this is dormant. If a future task adds AI back into a worker that tests via pool-workers, mirror the service-layer-stub pattern.
+
+#### L3 — Prettier and antfu/eslint disagree on CSS quote style
+
+Root `prettier` defaults to double quotes + 80-char wrap. `@antfu/eslint-config` with `formatters: true` enforces single quotes + 120-char wrap on CSS via its prettier-plugin. Without alignment, `lint-staged`'s `prettier --write` undoes whatever `eslint --fix` writes — an infinite oscillation.
+
+**Applied in Phase 3**: added root `.prettierrc.json` with a CSS-specific override (`singleQuote: true`, `printWidth: 120`).
+
+**Apply in Phase 4–6**:
+
+- New CSS files in `apps/demo/src/**.css`, `apps/docs/src/**.css`, `packages/embed/src/**.css` will inherit this config — no per-file action needed.
+- If a new package adds its own `prettier` config, **must extend** the root or duplicate the CSS override.
+
+#### L4 — Pre-commit hook only fixes staged files
+
+Husky's `lint-staged` runs `prettier --write` + `eslint --fix` on staged files only. **Unstaged lint debt in the same directory will not surface until CI's full-repo lint.** This bit Phase 3 three times in a row.
+
+**Apply in Phase 4–6**: before pushing each phase commit, run `pnpm lint` at the repo root locally to catch issues lint-staged misses. Add to the pre-flight checklist below.
+
+### 10.3 Pre-flight checklist for new sessions
+
+A fresh session opens at `C:\Users\suanw\projects\jairukchan\demo-project\QuestKit` on branch `main`. To pick up cleanly:
+
+1. **Register `QUESTKIT_APP_SECRET`** in GitHub repo Settings → Secrets and variables → Actions. Value = the same `APP_SECRET` set via `wrangler secret put APP_SECRET` in TASK-005. Without this, Newman in CI fails on every push. (User action — Claude can't do this.)
+2. Run `/workflow-todo` to load pending tasks from `todos.md`.
+3. The first ⚪ pending task in todo order is **TASK-020** (`@questkit/embed` IIFE bundle). It's parallel-with TASK-021 (`webhook-relay`).
+4. Before pushing any phase commit: `pnpm lint && pnpm typecheck && pnpm test` at repo root. This is the same check CI runs minus Newman — and it catches the unstaged lint debt that bit Phase 3.
+5. Reference §10.2 lessons whenever a test pattern feels wrong. Don't re-discover the workerd boundary.
+
+### 10.4 Phase 4–6 tech validation (May 2026 docs sweep)
+
+Research agent ran a 12-point sweep against current Cloudflare / Tailwind / Docusaurus / SonarCloud / GH CLI docs. Everything in §7 is confirmed valid **except one item:**
+
+#### ⚠ Plan amendment A22 — SonarCloud GH Action renamed
+
+**Original (TASK-029):** `sonarsource/sonarcloud-github-action@master`
+**Current:** `SonarSource/sonarqube-scan-action@v5`
+**Reason:** `sonarcloud-github-action` was **archived/deprecated on 2025-10-22**. The successor `sonarqube-scan-action@v5` is a drop-in replacement that serves both SonarQube Server and SonarQube Cloud (formerly SonarCloud) since v4.1.0. SonarCloud is still free for public repos.
+
+#### Other validated items (no change required)
+
+- **Cloudflare Queues consumer**: `export default { async queue(batch, env, ctx) {...} }` is the JS pattern. `WorkerEntrypoint` is for the **RPC target** worker (the API), not the consumer — exactly as TASK-022 already specifies. ✅
+- **`WorkerEntrypoint` RPC**: import from `cloudflare:workers`, declared via `services[].entrypoint` in the consumer's wrangler config. ✅ **Gotcha** — `wrangler types` may omit RPC method signatures (open issue [cloudflare/workers-sdk#8902](https://github.com/cloudflare/workers-sdk/issues/8902)); pass both wrangler configs to `wrangler types -c ./a/wrangler.jsonc -c ./b/wrangler.jsonc` as a workaround.
+- **tsdown IIFE**: `format: ['iife']` + `globalName: 'QuestKit'` + `platform: 'browser'` + `minify: true`. ✅ Single entry only; if multiple entries needed, create a barrel.
+- **Workers Static Assets**: `assets.directory`, `not_found_handling: "single-page-application"`, `run_worker_first` for auth interception. ✅
+- **Docusaurus 3.10.1** (latest) — no breaking changes since 3.10.0. ✅
+- **Docusaurus 3 + Tailwind v4**: integrate via a Docusaurus plugin that pushes `@tailwindcss/postcss` into webpack's PostCSS chain. **Gotcha** — Docusaurus' built-in Infima CSS has higher specificity than Tailwind utilities; budget time for `@layer` or `important: true` overrides during TASK-026.
+- **Vite 7 + `@tailwindcss/vite`**: canonical setup is `plugins: [tailwindcss()]` in `vite.config.ts` + `@import "tailwindcss";` in main.css. No `tailwind.config.js`. ✅
+- **`treosh/lighthouse-ci-action@v12`** — actively maintained (v12.6.2, March 2026). ✅
+- **`gh release create --notes-from-tag`** — flag still exists. ✅
+- **Queue consumer testing**: use `createMessageBatch(queueName, messages[])` + `getQueueResult(batch, ctx)` from `@cloudflare/vitest-pool-workers/context`. Bypasses workerd isolation entirely — this is the resolution to L1 for Phase 4 queue tests. ✅
+
+### 10.5 New tasks added during Phase 3 close-out
+
+- **TASK-032b** — ADR-006 "Test boundaries: service-layer stubs vs `cloudflare:test` pool-workers". Captures the Phase 3 discovery (L1 + L2 above) as a permanent decision record so a future contributor reading `docs/decisions/` understands _why_ `ai.service.test.ts` uses a hand-rolled env while route tests skip AI paths. Owned by the same task group as TASK-032 (Phase 6 ADRs); priority medium; parallel with the other ADRs.

@@ -43,3 +43,7 @@ postman/newman-report.json
 # Editor / OS
 Thumbs.db
 *.swp
+
+# Playground — generated embed bundle copied from packages/embed/dist at build time.
+# Source of truth lives in @questkit/embed; this is a build artifact, not source.
+apps/playground/public/questkit.iife.js

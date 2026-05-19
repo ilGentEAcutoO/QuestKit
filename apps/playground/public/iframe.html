@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>QuestKit Embed — iframe Context</title>
+    <link rel="stylesheet" href="/style.css" />
+    <style>
+      .pg-iframe {
+        width: 100%;
+        height: 720px;
+        border: 1px solid var(--pg-border);
+        border-radius: var(--pg-radius);
+        background: #fff;
+      }
+    </style>
+  </head>
+  <body>
+    <nav class="pg-nav">
+      <a href="/index.html">Plain HTML</a>
+      <a href="/wordpress.html">WordPress mock</a>
+      <a href="/iframe.html">iframe context</a>
+    </nav>
+    <main>
+      <h1>iframe context</h1>
+      <p>
+        The same plain HTML embed page is loaded below inside an <code>&lt;iframe&gt;</code>. The
+        QuestKit embed should work identically to a top-level mount — the IIFE does not depend
+        on cross-frame messaging, only on its own <code>document.currentScript</code> and the
+        widgets present in its document.
+      </p>
+      <p class="muted">
+        If you see the MissionList and CoinBalance widgets rendered inside the framed page
+        below, iframe-embedded usage is verified.
+      </p>
+
+      <iframe
+        class="pg-iframe"
+        src="/index.html"
+        title="QuestKit plain HTML embed (framed)"
+        loading="lazy"
+        referrerpolicy="no-referrer-when-downgrade"
+      ></iframe>
+
+      <hr />
+      <p class="muted">
+        No <code>questkit.iife.js</code> script tag on this outer page — only the framed
+        document inside the iframe loads the embed.
+      </p>
+    </main>
+  </body>
+</html>

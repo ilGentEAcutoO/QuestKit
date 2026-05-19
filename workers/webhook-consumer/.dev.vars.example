@@ -1,0 +1,5 @@
+# questkit-worker-webhook-consumer local secrets.
+# Copy to `.dev.vars` (gitignored) for `wrangler dev`. This worker has no
+# direct secrets — it relies on the `API` service binding to reach
+# questkit-worker-api, which owns the JWT/HMAC/APP secrets. Kept here for
+# parity with the other workers so `env-sync` doesn't flag a missing file.

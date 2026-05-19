@@ -1,7 +1,23 @@
 {
   "name": "@questkit/playground",
   "type": "module",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
-  "description": "QuestKit embed testbed (placeholder — built in TASK-023)."
+  "description": "questkit-worker-play — 3-page embed testbed (plain HTML, WordPress mock, iframe context).",
+  "scripts": {
+    "build": "node scripts/copy-embed.mjs",
+    "dev": "node scripts/copy-embed.mjs && wrangler dev",
+    "deploy": "node scripts/copy-embed.mjs && wrangler deploy",
+    "deploy:dry-run": "node scripts/copy-embed.mjs && wrangler deploy --dry-run",
+    "typecheck": "echo 'no ts in playground' && exit 0",
+    "lint": "echo 'no lint in playground html' && exit 0",
+    "clean": "rimraf public/questkit.iife.js .turbo"
+  },
+  "dependencies": {
+    "@questkit/embed": "workspace:*"
+  },
+  "devDependencies": {
+    "rimraf": "^6.0.1",
+    "wrangler": "catalog:"
+  }
 }

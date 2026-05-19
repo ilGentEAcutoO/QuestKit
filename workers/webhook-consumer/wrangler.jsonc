@@ -1,0 +1,53 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "questkit-worker-webhook-consumer",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-05-19",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+
+  // Queue consumer. The relay worker (questkit-worker-webhook-relay) is the
+  // producer side; both are bound to questkit-queue-webhooks. Per plan §2.5
+  // and amendment A21, failures retry up to 5 times with exponential backoff
+  // (the handler computes `delaySeconds`), then land in
+  // questkit-queue-webhooks-dlq.
+  //
+  // - max_batch_size: 10  — the consumer processes each message individually
+  //                          inside the handler, so batching is a throughput
+  //                          knob, not a correctness one. 10 is the CF default
+  //                          ceiling for queue consumers.
+  // - max_batch_timeout: 30 — how long Workers waits before flushing a partial
+  //                            batch. 30s keeps latency bounded for slow streams.
+  // - max_retries: 5      — total attempts (incl. the first); after the 5th
+  //                          retry the message is sent to the DLQ.
+  // - retry_delay: 30     — the queue-level default; the handler overrides
+  //                          per-message via msg.retry({ delaySeconds }).
+  "queues": {
+    "consumers": [
+      {
+        "queue": "questkit-queue-webhooks",
+        "max_batch_size": 10,
+        "max_batch_timeout": 30,
+        "max_retries": 5,
+        "dead_letter_queue": "questkit-queue-webhooks-dlq",
+        "retry_delay": 30
+      }
+    ]
+  },
+
+  // Service binding to the api worker's `ApiService` WorkerEntrypoint. The
+  // consumer calls `env.API.ingestEvent(event)` directly — typed RPC, no
+  // HTTP. This is the binding that makes /v1/events idempotency, rule
+  // engine, and AE writes reusable from this worker.
+  //
+  // Per cloudflare/workers-sdk#8902, `wrangler types` may not infer the RPC
+  // method signature here. We redeclare the typed shape in src/env.d.ts as a
+  // workaround. Once 8902 closes, the redeclaration becomes a no-op.
+  "services": [
+    {
+      "binding": "API",
+      "service": "questkit-worker-api",
+      "entrypoint": "ApiService"
+    }
+  ]
+}

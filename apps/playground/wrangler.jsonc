@@ -1,0 +1,22 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "questkit-worker-play",
+  "compatibility_date": "2026-05-19",
+  "observability": { "enabled": true },
+
+  // Pure static-asset Worker. No `main` / `src/index.ts` — the [assets]
+  // binding serves the three HTML pages, the shared stylesheet, and the
+  // IIFE embed bundle copied in by scripts/copy-embed.mjs.
+  //
+  // `not_found_handling: "404-page"` is intentional. The playground is a
+  // discrete 3-page testbed (index, wordpress, iframe), not an SPA — we
+  // do NOT want unknown routes to silently rewrite to index.html.
+  "assets": {
+    "directory": "./public",
+    "not_found_handling": "404-page"
+  }
+
+  // Custom-domain wiring (play.questkit.jairukchan.com) is intentionally
+  // deferred to TASK-030 (Phase 6). Until then `wrangler dev` covers local
+  // verification and `wrangler deploy --dry-run` keeps the config honest.
+}

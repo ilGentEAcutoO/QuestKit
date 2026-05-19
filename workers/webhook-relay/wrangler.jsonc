@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "questkit-worker-webhook-relay",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-05-19",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+
+  // Queue producer only. The consumer side (queue draining + RPC to the api
+  // worker) lives in workers/webhook-consumer (TASK-022). DLQ binding is the
+  // consumer's responsibility — not declared here.
+  "queues": {
+    "producers": [
+      {
+        "binding": "WEBHOOK_QUEUE",
+        "queue": "questkit-queue-webhooks"
+      }
+    ]
+  }
+
+  // Secret `WEBHOOK_HMAC_SECRET` is set out-of-band via
+  // `wrangler secret put WEBHOOK_HMAC_SECRET --name questkit-worker-webhook-relay`
+  // and never committed. The placeholder is documented in .dev.vars.example.
+}

@@ -3,5 +3,25 @@
   "type": "module",
   "version": "0.0.0",
   "private": true,
-  "description": "questkit-worker-webhook-consumer — Queue consumer + WorkerEntrypoint RPC to api (placeholder — populated in TASK-022)."
+  "description": "questkit-worker-webhook-consumer — drains questkit-queue-webhooks and ingests events into questkit-worker-api via WorkerEntrypoint RPC.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "deploy:dry-run": "wrangler deploy --dry-run",
+    "cf-typegen": "wrangler types",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@questkit/types": "workspace:^"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "catalog:",
+    "@cloudflare/workers-types": "catalog:",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:",
+    "wrangler": "catalog:"
+  }
 }

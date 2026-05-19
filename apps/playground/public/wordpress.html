@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>QuestKit Embed — WordPress Mock</title>
+    <meta name="questkit-token" content="REPLACE_WITH_MINTED_JWT" />
+    <link rel="stylesheet" href="/style.css" />
+    <style>
+      /*
+       * Aggressive global rules intentionally written to look like a
+       * cheap WordPress theme. The point of this page is to demonstrate
+       * that QuestKit widgets, isolated by Shadow DOM, are immune to:
+       *   - serif font overrides on body
+       *   - universal selectors inside .wp-content forcing colors
+       *   - global box-shadow / border overrides on every <div>
+       *   - h1-h6 font-family resets
+       *   - aggressive line-height & letter-spacing
+       *
+       * If Shadow DOM isolation works, the widgets keep system-stack
+       * sans-serif, normal colors, and their own spacing.
+       */
+      body {
+        font-family: Georgia, 'Times New Roman', serif;
+        background: #f5efe2;
+        color: #2b2b2b;
+      }
+
+      .wp-site {
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 1.5rem;
+        display: grid;
+        grid-template-columns: 1fr 260px;
+        gap: 1.5rem;
+      }
+
+      .wp-content {
+        background: #fff;
+        border: 2px solid #b9a274;
+        padding: 1.25rem 1.5rem;
+      }
+
+      .wp-content * {
+        color: brown;
+        letter-spacing: 0.005em;
+      }
+
+      .wp-content div {
+        box-shadow: inset 0 0 0 1px rgba(150, 70, 0, 0.06);
+      }
+
+      .wp-content h1,
+      .wp-content h2,
+      .wp-content h3 {
+        font-family: 'Times New Roman', serif;
+        font-weight: 700;
+      }
+
+      .wp-content h1 {
+        font-size: 2rem;
+        border-bottom: 3px double #b9a274;
+        padding-bottom: 0.4rem;
+      }
+
+      .wp-content article {
+        margin: 1.5rem 0;
+        padding-bottom: 1rem;
+        border-bottom: 1px dotted #b9a274;
+      }
+
+      .entry-title {
+        margin: 0 0 0.25rem;
+      }
+
+      .entry-title a {
+        color: #5a3010;
+        text-decoration: none;
+      }
+
+      .post-meta {
+        font-size: 0.85rem;
+        color: #8a6c3d;
+        font-style: italic;
+        margin-bottom: 0.5rem;
+      }
+
+      .entry-content p {
+        margin: 0.4rem 0;
+      }
+
+      .wp-sidebar {
+        background: #f8efd6;
+        border: 2px solid #b9a274;
+        padding: 1rem;
+        font-size: 0.95rem;
+        align-self: start;
+      }
+
+      .sidebar-widget {
+        margin: 0.5rem 0 1rem;
+      }
+
+      .sidebar-widget h3 {
+        font-family: 'Times New Roman', serif;
+        margin: 0 0 0.4rem;
+        font-size: 1rem;
+        border-bottom: 2px solid #b9a274;
+        padding-bottom: 0.2rem;
+      }
+
+      .sidebar-widget ul {
+        padding-left: 1.2rem;
+        margin: 0.25rem 0;
+      }
+
+      .sidebar-widget li {
+        margin: 0.15rem 0;
+      }
+
+      .wp-callout {
+        background: #fffaee;
+        border-left: 4px solid #b9a274;
+        padding: 0.75rem 1rem;
+        margin: 1rem 0;
+        font-size: 0.9rem;
+      }
+    </style>
+  </head>
+  <body>
+    <nav class="pg-nav">
+      <a href="/index.html">Plain HTML</a>
+      <a href="/wordpress.html">WordPress mock</a>
+      <a href="/iframe.html">iframe context</a>
+    </nav>
+
+    <div class="wp-site">
+      <div class="wp-content">
+        <h1>Bramble Cottage Journal</h1>
+        <p class="post-meta">A tiny WordPress-style blog — and an embed isolation test.</p>
+
+        <article>
+          <h2 class="entry-title"><a href="#">Five small things that made the week</a></h2>
+          <div class="post-meta">Posted May 17, 2026 &middot; by Wren &middot; in Notes</div>
+          <div class="entry-content">
+            <p>
+              Friday rain on the metal roof, a new shipment of strong bread flour, the cat
+              finally letting me clip his back claws, a borrowed copy of <em>Piranesi</em>
+              that I read in one sitting, and a long-overdue phone call.
+            </p>
+            <p>
+              I'm trying to get into the habit of writing these down. Small things matter
+              more than I used to think.
+            </p>
+            <div class="wp-callout">
+              <strong>Heads up:</strong> the gamification widget below comes from a third-party
+              embed. The host theme is doing its level best to repaint everything brown and
+              serif — the widget should ignore all of it.
+            </div>
+
+            <h3>Today's missions</h3>
+            <div data-questkit="MissionList"></div>
+          </div>
+        </article>
+
+        <article>
+          <h2 class="entry-title"><a href="#">Sourdough log: starter at 12 days</a></h2>
+          <div class="post-meta">Posted May 14, 2026 &middot; by Wren &middot; in Baking</div>
+          <div class="entry-content">
+            <p>
+              The starter (<em>Hilda</em>) is rising reliably 4-5 hours after a 1:5:5 feed
+              at 24 deg C. Tonight's loaf had a nice ear but the crumb is still tighter
+              than I'd like — going to push hydration to 78% next bake.
+            </p>
+            <h3>Your coin balance</h3>
+            <div data-questkit="CoinBalance"></div>
+          </div>
+        </article>
+      </div>
+
+      <aside class="wp-sidebar">
+        <div class="sidebar-widget">
+          <h3>About</h3>
+          <p>
+            A small WordPress mock used by the QuestKit team to verify Shadow DOM isolation
+            against gnarly host CSS.
+          </p>
+        </div>
+        <div class="sidebar-widget">
+          <h3>Recent posts</h3>
+          <ul>
+            <li><a href="#">Five small things that made the week</a></li>
+            <li><a href="#">Sourdough log: starter at 12 days</a></li>
+            <li><a href="#">A short note on broody hens</a></li>
+            <li><a href="#">Mending the garden gate</a></li>
+          </ul>
+        </div>
+        <div class="sidebar-widget">
+          <h3>Categories</h3>
+          <ul>
+            <li><a href="#">Baking</a></li>
+            <li><a href="#">Garden</a></li>
+            <li><a href="#">Notes</a></li>
+          </ul>
+        </div>
+      </aside>
+    </div>
+
+    <script
+      src="/questkit.iife.js"
+      data-questkit-app-id="playground-demo"
+      data-questkit-user-id="usr_demo"
+      data-questkit-base-url="https://api.questkit.jairukchan.com"
+    ></script>
+  </body>
+</html>

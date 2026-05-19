@@ -1,0 +1,6 @@
+# questkit-worker-webhook-relay local secrets.
+# Copy to `.dev.vars` (gitignored) and fill in for `wrangler dev`.
+
+# HMAC-SHA256 key for inbound webhook signature verification.
+# generate: openssl rand -base64 48
+WEBHOOK_HMAC_SECRET=
