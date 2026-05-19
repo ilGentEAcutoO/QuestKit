@@ -24,7 +24,7 @@ catalog:
   tsdown: ^0.22.0
 
   # Test tooling
-  vitest: ^3.2.0
+  vitest: ^4.1.6
   "@cloudflare/vitest-pool-workers": ^0.6.0
   jest: ^29.7.0
   ts-jest: ^29.2.5
