@@ -6,7 +6,12 @@
  * the scratch card. Each component is keyboard accessible and respects
  * `prefers-reduced-motion`.
  */
-import { ScratchCard, SpinWheel, type SpinWheelSlice } from "@questkit/react";
+import {
+  ScratchCard,
+  SpinWheel,
+  type SpinWheelSlice,
+  useEvent,
+} from "@questkit/react";
 import { type ReactElement, useState } from "react";
 
 import { useDemoToast } from "../components/DemoToastHost";
@@ -53,6 +58,7 @@ const WHEEL_SLICES: SpinWheelSlice[] = [
 
 export function MiniGamesRoute(): ReactElement {
   const { show: showToast } = useDemoToast();
+  const { fireEvent } = useEvent();
   const [lastWheelLabel, setLastWheelLabel] = useState<string | null>(null);
   const [scratchRevealed, setScratchRevealed] = useState<boolean>(false);
 
@@ -88,6 +94,19 @@ export function MiniGamesRoute(): ReactElement {
               const slice = WHEEL_SLICES.find((s) => s.reward === reward);
               setLastWheelLabel(slice?.label ?? "Reward");
               showToast(reward);
+              // Fire a synthetic event so the EventLog drawer reflects
+              // the spin in the same live-update timeline as ecommerce
+              // purchases and daily check-ins. The server has no mission
+              // matching `qk.minigame.spin`, so the event is recorded but
+              // no mission progress is broadcast — the visual celebration
+              // is the entire payoff here.
+              void fireEvent({
+                name: "qk.minigame.spin",
+                payload: {
+                  game: "spin_wheel",
+                  reward,
+                },
+              });
             }}
           />
           <p
@@ -132,6 +151,10 @@ export function MiniGamesRoute(): ReactElement {
             onReveal={() => {
               setScratchRevealed(true);
               showToast({ kind: "currency", currency: "coin", amount: 30 });
+              void fireEvent({
+                name: "qk.minigame.scratch",
+                payload: { game: "scratch_card", amount: 30 },
+              });
             }}
           />
           <p
