@@ -71,40 +71,24 @@ jobs:
         run: pnpm audit --prod --audit-level=high
         continue-on-error: true
 
-  # SonarQube/SonarCloud quality gate (per plan amendment A22). Gated on
-  # secrets.SONAR_TOKEN being set so the workflow stays green for forks/PRs
-  # that don't have access to the secret. To enable: create the SonarCloud
-  # org + import this repo (SonarCloud → My Account → Add → GitHub), then
-  # add SONAR_TOKEN to GitHub repo Secrets. The badge in README will go
-  # live on the next push.
-  sonarcloud:
-    name: SonarCloud quality gate
-    runs-on: ubuntu-latest
-    needs: [verify]
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Probe for SONAR_TOKEN
-        id: probe
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        run: |
-          if [ -z "$SONAR_TOKEN" ]; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::SONAR_TOKEN secret not set — skipping SonarCloud scan. Enable by creating the SonarCloud org and adding the token in GitHub Settings → Secrets."
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
-      - name: SonarQube scan
-        if: steps.probe.outputs.skip == 'false'
-        # v5 has a HIGH argument-injection advisory (GHSA-5xq9-5g24-4g6f);
-        # v6 is the patched release.
-        uses: SonarSource/sonarqube-scan-action@v6
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+  # ---------------------------------------------------------------------------
+  # SonarCloud (note for future contributors):
+  #
+  # No SonarCloud job is wired into CI on purpose. SonarCloud is set up to
+  # use its **Automatic Analysis** mode (the default after importing the
+  # repo), which scans every push from sonarcloud.io's side without any
+  # CI-side action. The README quality-gate badge is driven directly off
+  # those Auto Analysis results.
+  #
+  # If a future contributor wants CI-based analysis (e.g. for monorepo
+  # coverage merging or custom scanner properties), they must FIRST disable
+  # Automatic Analysis at:
+  #   https://sonarcloud.io/project/analysis_method?id=ilGentEAcutoO_QuestKit
+  # SonarCloud rejects CI scans while Auto Analysis is active with:
+  #   "ERROR You are running CI analysis while Automatic Analysis is enabled"
+  # Then add a sonarcloud job here using SonarSource/sonarqube-scan-action@v6
+  # (v5 has the GHSA-5xq9-5g24-4g6f argument-injection advisory).
+  # ---------------------------------------------------------------------------
 
   newman:
     name: Newman API contract tests
