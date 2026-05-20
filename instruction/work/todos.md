@@ -895,7 +895,7 @@
 
 ### Task: [TASK-029] SonarCloud quality gate
 
-- **Status:** ⚪ pending
+- **Status:** 🟢 completed (Auto Analysis enabled; live badge in README; CI job dropped per `48292d1`)
 - **Priority:** medium
 - **Parallel:** yes
 - **Assigned:** unassigned
