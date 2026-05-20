@@ -13,12 +13,14 @@ concurrency:
 permissions:
   contents: read
   pull-requests: read
-  security-events: write
 
 jobs:
   verify:
     name: Lint, typecheck, test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
