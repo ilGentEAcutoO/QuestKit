@@ -311,10 +311,10 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('200 OK', () => pm.response.to.have.status(200));",
-                  "pm.test('missions[] length 6 + progress is object', () => {",
+                  "pm.test('missions[] length 9 + progress is object', () => {",
                   "  const j = pm.response.json();",
                   "  pm.expect(j.missions).to.be.an('array');",
-                  "  pm.expect(j.missions.length, 'seed mission count').to.equal(6);",
+                  "  pm.expect(j.missions.length, 'seed mission count').to.equal(9);",
                   "  pm.expect(j.progress).to.be.an('object');",
                   "  pm.collectionVariables.set('first_mission_id', j.missions[0].id);",
                   "});"
