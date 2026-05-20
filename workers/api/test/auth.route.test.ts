@@ -141,3 +141,51 @@ describe("post /v1/auth/token (denylist plumbing)", () => {
     // intentionally empty — placeholder for grep'ability only.
   });
 });
+
+describe("post /v1/auth/token (kind claim — Phase 8 / TASK-003)", () => {
+  it("omits 'kind' from the JWT payload when body.kind is absent (regular mint path)", async () => {
+    const res = await post({
+      appId: "test_app",
+      appSecret: APP_SECRET,
+      userId: "u_kind_omitted_1",
+    });
+    expect(res.status).toBe(200);
+    const { token } = (await res.json()) as { token: string };
+    const payload = await verify(token, env.JWT_SECRET);
+    expect((payload as { kind?: unknown }).kind).toBeUndefined();
+  });
+
+  it("includes kind:'demo' in the JWT payload when body.kind === 'demo'", async () => {
+    const res = await SELF.fetch("https://api.test/v1/auth/token", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        appId: "test_app",
+        appSecret: APP_SECRET,
+        userId: "demo_user_kind_yes_1",
+        kind: "demo",
+      }),
+    });
+    expect(res.status).toBe(200);
+    const { token } = (await res.json()) as { token: string };
+    const payload = await verify(token, env.JWT_SECRET);
+    expect((payload as { kind?: string }).kind).toBe("demo");
+  });
+
+  it("ignores unknown kind values (defence-in-depth — only 'demo' is whitelisted)", async () => {
+    const res = await SELF.fetch("https://api.test/v1/auth/token", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        appId: "test_app",
+        appSecret: APP_SECRET,
+        userId: "u_kind_unknown_1",
+        kind: "admin", // not allowed
+      }),
+    });
+    expect(res.status).toBe(200);
+    const { token } = (await res.json()) as { token: string };
+    const payload = await verify(token, env.JWT_SECRET);
+    expect((payload as { kind?: string }).kind).toBeUndefined();
+  });
+});
