@@ -30,10 +30,12 @@ curl -X POST https://api.questkit.jairukchan.com/v1/auth/token \
 
 ```json
 {
-  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c3JfZGVtb18xMjMiLCJpYXQiOjE3MTYxMDAwMDAsImV4cCI6MTcxNjEwMzYwMCwianRpIjoiYWJjMTIzLXV1aWQifQ.signature",
+  "token": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c3JfZGVtbyJ9.<signature>",
   "expiresAt": 1716103600000
 }
 ```
+
+> The `token` above is **truncated for docs**; a real JWT's three segments are longer. The structure stays the same: `base64url(header).base64url(payload).base64url(hmacSignature)`.
 
 | Field       | Type     | Description                                                           |
 | ----------- | -------- | --------------------------------------------------------------------- |
