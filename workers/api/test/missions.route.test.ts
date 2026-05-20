@@ -155,19 +155,23 @@ describe("/v1/missions — auth", () => {
 // ----- GET /v1/missions ---------------------------------------------------
 
 describe("get /v1/missions", () => {
-  it("returns all 6 seed missions with an empty progress map for a new user", async () => {
+  it("returns all 9 seed missions with an empty progress map for a new user", async () => {
     const userId = "u_list_missions_1";
     const { token } = await mintToken(userId);
     const res = await getMissions("", { token });
     expect(res.status).toBe(200);
     const body = (await res.json()) as MissionsListResp;
-    expect(body.missions.length).toBe(6);
-    // All 6 seed mission ids should be present.
+    // 6 from migration 0002 (3 ecom + 3 streaming) + 3 added later:
+    // mis_daily_visitor (0003), mis_lucky_spinner + mis_scratch_master (0004).
+    expect(body.missions.length).toBe(9);
     const ids = body.missions.map((m) => m.id).sort();
     expect(ids).toEqual([
+      "mis_daily_visitor",
       "mis_ecom_daily_purchase_3",
       "mis_ecom_electronics_50",
       "mis_ecom_variety_week",
+      "mis_lucky_spinner",
+      "mis_scratch_master",
       "mis_stream_daily_watch_1",
       "mis_stream_documentary_3",
       "mis_stream_longform_week",
@@ -175,13 +179,15 @@ describe("get /v1/missions", () => {
     expect(body.progress).toEqual({});
   });
 
-  it("?campaignId=camp_ecom_2026q2 returns only the 3 e-commerce missions", async () => {
+  it("?campaignId=camp_ecom_2026q2 returns only the 6 e-commerce-attached missions", async () => {
     const userId = "u_list_missions_campaign";
     const { token } = await mintToken(userId);
     const res = await getMissions("?campaignId=camp_ecom_2026q2", { token });
     expect(res.status).toBe(200);
     const body = (await res.json()) as MissionsListResp;
-    expect(body.missions.length).toBe(3);
+    // 3 original ecom missions + 3 added via migrations 0003+0004 that were
+    // attached to the same campaign so they surface in the demo's mission list.
+    expect(body.missions.length).toBe(6);
     for (const m of body.missions) {
       expect(m.campaignId).toBe("camp_ecom_2026q2");
     }
