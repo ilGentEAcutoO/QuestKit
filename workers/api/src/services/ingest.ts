@@ -22,7 +22,7 @@
  * `body.idempotencyKey`. The route uses RFC 9530 semantics (header wins);
  * the RPC entrypoint just threads whatever the message carries.
  */
-import type { Event } from "@questkit/types";
+import type { Event, MissionProgress, SDKUpdate } from "@questkit/types";
 import {
   ensureUser,
   getEventByIdemKey,
@@ -32,6 +32,52 @@ import {
 import { evaluateEvent } from "../rules";
 import { writeEventDataPoint } from "./ae";
 import * as idem from "./idempotency";
+
+/**
+ * Best-effort fan-out of mission progress updates to the user's SSE_HUB
+ * Durable Object. Each updated progress row becomes either a
+ * `mission.completed` SDKUpdate (if the new status is "completed" or
+ * "claimed") or a `mission.progress` SDKUpdate. The DO broadcasts to
+ * every connected client.
+ *
+ * Mirrors `tryBroadcastClaim` in routes/missions.ts. Failures are
+ * swallowed — the demo's polling fallback covers SSE outages, and a
+ * broadcast error must NEVER take down event ingestion.
+ *
+ * Without this fan-out, /v1/events POST succeeded on the server but the
+ * client's SSE subscriber never saw the resulting progress changes —
+ * the demo's EventLog drawer stayed empty even though missions DID
+ * progress server-side. Surfaced by the live click-through test sweep.
+ */
+async function tryBroadcastProgress(
+  env: Env,
+  userId: string,
+  updated: MissionProgress[],
+): Promise<void> {
+  if (updated.length === 0) return;
+  try {
+    const stubId = env.SSE_HUB.idFromName(userId);
+    const stub = env.SSE_HUB.get(stubId);
+    for (const progress of updated) {
+      const update: SDKUpdate =
+        progress.status === "completed" || progress.status === "claimed"
+          ? { type: "mission.completed", data: progress }
+          : { type: "mission.progress", data: progress };
+      const resp = await stub.fetch("https://_/broadcast", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(update),
+      });
+      if (resp.status !== 200) {
+        console.warn(
+          `[ingest] sse-hub returned unexpected status ${resp.status}`,
+        );
+      }
+    }
+  } catch (err) {
+    console.warn("[ingest] sse-hub broadcast threw, swallowed", err);
+  }
+}
 
 /**
  * Body shape ingestEventCore accepts. Matches the validated `EventBody` from
@@ -168,7 +214,12 @@ export async function ingestEventCore(
     nowMs: Date.now(),
   });
 
-  // Step 10: build the response shape, then cache if an idempotency key was
+  // Step 10: fan out mission updates over SSE so subscribed clients see
+  // live progress (this is the entire point of the SSE hub). Best-effort:
+  // a hub miss must NEVER fail the ingest itself.
+  await tryBroadcastProgress(env, userId, updated);
+
+  // Step 11: build the response shape, then cache if an idempotency key was
   // provided so subsequent replays return byte-identical JSON.
   const response = {
     accepted: true as const,

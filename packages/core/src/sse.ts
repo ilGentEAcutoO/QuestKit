@@ -75,7 +75,15 @@ export class SSEClient {
 
   constructor(opts: SSEOpts) {
     this.opts = opts;
-    this.fetchImpl = opts.fetchImpl ?? fetch;
+    // Bind to globalThis for the same reason as client.ts + polling.ts: calling
+    // `this.fetchImpl(...)` as a method invokes the browser's native fetch with
+    // `this === SSEClient`, which throws "TypeError: Illegal invocation". The
+    // SSE handler catches it as a stream error → 5 reconnect retries all fail
+    // → polling fallback kicks in but the SSE network request never even
+    // appears in DevTools, so the demo's "live updates" promise was broken
+    // until the poll interval caught up. This was the third instance of the
+    // same unbound-native-API bug pattern.
+    this.fetchImpl = opts.fetchImpl ?? fetch.bind(globalThis);
     this.maxReconnect = opts.maxReconnectAttempts ?? DEFAULT_MAX_RECONNECT;
     this.baseBackoffMs = opts.baseBackoffMs ?? DEFAULT_BASE_BACKOFF_MS;
     this.maxBackoffMs = opts.maxBackoffMs ?? DEFAULT_MAX_BACKOFF_MS;
