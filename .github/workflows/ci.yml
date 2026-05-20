@@ -100,7 +100,9 @@ jobs:
           fi
       - name: SonarQube scan
         if: steps.probe.outputs.skip == 'false'
-        uses: SonarSource/sonarqube-scan-action@v5
+        # v5 has a HIGH argument-injection advisory (GHSA-5xq9-5g24-4g6f);
+        # v6 is the patched release.
+        uses: SonarSource/sonarqube-scan-action@v6
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
