@@ -15,14 +15,9 @@
   <a href="https://workers.cloudflare.com/"><img alt="Powered by Cloudflare" src="https://img.shields.io/badge/Powered%20by-Cloudflare-F38020?logo=cloudflare&logoColor=white"></a>
 </p>
 
-<!--
-  TASK-033 user step: drop a 60-second screencap at `docs/media/demo.gif`
-  (1100×620 max, < 6 MB) and uncomment the <img> below.
-
-  <p align="center">
-    <img alt="QuestKit demo" src="docs/media/demo.gif" width="720">
-  </p>
--->
+<p align="center">
+  <img alt="QuestKit demo — e-commerce, missions, claim, mini-games across the four scenarios" src="docs/media/demo.gif" width="720">
+</p>
 
 <p align="center">
   <a href="https://questkit.jairukchan.com">Live Demo</a> ·
