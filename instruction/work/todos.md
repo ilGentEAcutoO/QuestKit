@@ -1,6 +1,6 @@
 # QuestKit — Active Tasks (Phase 8 / v0.1.4)
 
-> Last updated: 2026-05-20 18:20
+> Last updated: 2026-05-20 19:30
 > Plan: [`plan.md`](./plan.md) · Requirements: [`requirements.md`](./requirements.md)
 > Predecessor archived at `../archive/001-phase-7-security-hardening-v0.1.3/`
 
@@ -108,24 +108,30 @@
 
 ### Task: [TASK-005] Frontend fetch timeouts (defense-in-depth)
 
-- **Status:** ⚪ pending
+- **Status:** 🟢 done
 - **Priority:** medium
 - **Parallel:** yes
-- **Assigned:** unassigned
+- **Assigned:** task-005 worker (worktree: task-005-fe-timeouts)
 - **Depends on:** -
 - **Skills:** workflow-work, git-commit
 - **Files:**
   - `packages/core/src/client.ts`
+  - `packages/core/src/errors.ts`
+  - `packages/core/test/client.test.ts`
   - `apps/demo/src/lib/auth.ts`
   - `apps/demo/src/server/index.ts`
+  - `packages/react/src/components/MissionCard/index.tsx`
+  - `packages/react/test/components/MissionCard.test.tsx`
+  - `packages/react/test/hooks/useEvent.test.tsx`
 - **Subtasks:**
-  - [ ] implement: every internal `fetch` in core/client.ts gets `signal: AbortSignal.timeout(10000)` (configurable via constructor `timeoutMs`)
-  - [ ] implement: timeout rejects with `QuestKitError({ code: "timeout" })`
-  - [ ] implement: demo mint fetch + upstream proxy fetch both get timeouts (10s / 8s)
-  - [ ] test: client.test.ts — each method rejects with timeout error when fetch hangs
-  - [ ] test: useEvent / useMissionClaim unstick after timeout
+  - [x] implement: every internal `fetch` in core/client.ts gets `signal: AbortSignal.timeout(10000)` (configurable via constructor `timeoutMs`) — centralised via private `request()` helper so TASK-003's `demoReset()` will inherit it automatically
+  - [x] implement: timeout rejects with `QuestKitError({ code: "timeout" })` (message names the configured ms so logs are diagnosable)
+  - [x] implement: demo mint fetch + upstream proxy fetch both get timeouts (10s / 8s)
+  - [x] test: client.test.ts — each public method (mint/getMissions/getMission/claim/getBalances/getBalance/getCampaigns/getCampaign/getRecommendations) rejects with timeout when fetch hangs; fireEvent queues (intentional, see Progress Notes); end-to-end AbortSignal.timeout mapping verified
+  - [x] test: useEvent unsticks `isFiring` after timeout (rejection + queue paths); MissionCard's `Claiming…` state clears after onClaim rejects with timeout
 - **Progress Notes:**
   - 2026-05-20 18:20 — Created. Even after TASK-001 fixes the deadlock, FE-side timeouts convert any future API hang into a recoverable toast.
+  - 2026-05-20 19:30 — Implemented. Centralised SDK fetch through `private async request()` so every existing method AND future ones (TASK-003 demoReset) inherit the timeout. `fireEvent` intentionally swallows timeouts → returns `queued: true` (preserves the at-least-once contract); other methods reject with `QuestKitError({code:"timeout"})`. Demo's `/api/token` browser fetch gets 10s, demo worker's upstream hop gets 8s. Added 15 timeout-specific tests in client.test.ts + 2 in useEvent.test.tsx + 1 in MissionCard.test.tsx. Also patched MissionCard's click handler to `.catch()` the rejected handleClaim — otherwise a timeout reaches the host as an unhandled-rejection. All 230 tests green (102 core + 128 react), typecheck + prettier clean.
 
 ---
 

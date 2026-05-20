@@ -53,6 +53,16 @@ export interface QuestKitConfig {
   fetchImpl?: typeof fetch;
   /** Poll interval used when the SSE stream gives up. Default 5000ms. */
   pollIntervalMs?: number;
+  /**
+   * Per-request timeout for the SDK's REST fetches (mintToken, fireEvent,
+   * authedFetch). Default 10000ms. The SSE long-poll deliberately does NOT
+   * honour this — it has its own lifetime managed by the reconnect loop.
+   *
+   * On timeout the request rejects with `QuestKitError({code:"timeout"})`
+   * so callers (and hooks like `useEvent`) can recover instead of leaving
+   * an `isFiring` / `isClaiming` flag stuck forever.
+   */
+  timeoutMs?: number;
 }
 
 export interface FireEventInput {
@@ -124,6 +134,9 @@ interface MintTokenResult {
   expiresAt: number;
 }
 
+/** Default request timeout (ms) — see QuestKitConfig.timeoutMs. */
+const DEFAULT_TIMEOUT_MS = 10_000;
+
 export class QuestKitClient {
   private readonly baseUrl: string;
   private readonly appId: string;
@@ -131,6 +144,7 @@ export class QuestKitClient {
   private readonly fetchImpl: typeof fetch;
   private readonly storage: Storage;
   private readonly pollIntervalMs: number;
+  private readonly timeoutMs: number;
   private readonly events: EventQueue;
   /** SSE client — lazy-created on first subscribe(). */
   private sse: SSEClient | null = null;
@@ -160,7 +174,62 @@ export class QuestKitClient {
     this.fetchImpl = config.fetchImpl ?? fetch.bind(globalThis);
     this.storage = config.storage ?? detectStorage();
     this.pollIntervalMs = config.pollIntervalMs ?? 5000;
+    // Allow `timeoutMs: 0` to mean "no timeout" (mainly for tests that drive
+    // a never-resolving fetch by hand). Negative / NaN values fall back to
+    // the default to avoid an immediately-aborting client.
+    const configured = config.timeoutMs;
+    this.timeoutMs =
+      typeof configured === "number" && configured >= 0
+        ? configured
+        : DEFAULT_TIMEOUT_MS;
     this.events = new EventQueue({ storage: this.storage });
+  }
+
+  /**
+   * Internal fetch helper — wraps `this.fetchImpl` with a per-request
+   * AbortSignal timeout and re-throws AbortError as a stable
+   * `QuestKitError({code:"timeout"})`. EVERY REST call in this client goes
+   * through here so a slow / down API can never wedge UI state.
+   *
+   * The SSE stream (sse.ts) is deliberately NOT routed through this helper:
+   * SSE is a long-poll by design, the AbortController it owns belongs to
+   * the reconnect loop, and a timeout here would convert healthy idle
+   * streams into reconnect storms.
+   *
+   * If the caller passes their own `signal` we honour it AND the timeout —
+   * the request aborts on whichever fires first. (Current callers don't,
+   * but the contract makes this future-proof when a host wants to cancel
+   * an in-flight claim on unmount.)
+   */
+  private async request(
+    url: string,
+    init: RequestInit = {},
+  ): Promise<Response> {
+    // `timeoutMs: 0` opt-out — pass through the caller's init untouched.
+    if (this.timeoutMs === 0) {
+      return this.fetchImpl(url, init);
+    }
+    const timeoutSignal = AbortSignal.timeout(this.timeoutMs);
+    const signal =
+      init.signal === undefined || init.signal === null
+        ? timeoutSignal
+        : anyAbortSignal([init.signal, timeoutSignal]);
+    try {
+      return await this.fetchImpl(url, { ...init, signal });
+    } catch (err) {
+      // AbortSignal.timeout fires a DOMException("TimeoutError"); a
+      // user-aborted controller fires DOMException("AbortError"). We only
+      // map the OUR-side timeout to QuestKitError — caller-aborted requests
+      // rethrow verbatim so host code can distinguish unmount-cancel from
+      // a slow server.
+      if (isTimeoutAbort(err, timeoutSignal)) {
+        throw new QuestKitError(
+          `request timed out after ${this.timeoutMs}ms`,
+          "timeout",
+        );
+      }
+      throw err;
+    }
   }
 
   // ============================================================
@@ -179,7 +248,7 @@ export class QuestKitClient {
    *   200: { token, expiresAt }
    */
   async mintToken(input: MintTokenInput): Promise<MintTokenResult> {
-    const resp = await this.fetchImpl(`${this.baseUrl}/v1/auth/token`, {
+    const resp = await this.request(`${this.baseUrl}/v1/auth/token`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -225,10 +294,13 @@ export class QuestKitClient {
     };
 
     // Try once immediately; on transient failure, enqueue + return queued.
+    // A request-timeout is treated identically to any other network failure:
+    // the event is durable in the queue and the background flush will
+    // retry — the caller's `isFiring` flag clears via the resolved promise.
     const sendFn: SendFn = async (e): Promise<SendResult> => {
       try {
         const token = await this.getTokenFn();
-        const resp = await this.fetchImpl(`${this.baseUrl}/v1/events`, {
+        const resp = await this.request(`${this.baseUrl}/v1/events`, {
           method: "POST",
           headers: {
             "content-type": "application/json",
@@ -254,7 +326,9 @@ export class QuestKitClient {
           resp.status >= 500 || resp.status === 408 || resp.status === 429;
         return { ok: false, status: resp.status, retryable };
       } catch {
-        // Network-level failure — definitely retryable.
+        // Network-level failure (incl. QuestKitError(timeout)) — definitely
+        // retryable. The event is queued; the foreground promise resolves
+        // with `queued: true` so the caller's UI flag can clear.
         return { ok: false, status: 0, retryable: true };
       }
     };
@@ -301,7 +375,7 @@ export class QuestKitClient {
     const sendFn: SendFn = async (e): Promise<SendResult> => {
       try {
         const token = await this.getTokenFn();
-        const resp = await this.fetchImpl(`${this.baseUrl}/v1/events`, {
+        const resp = await this.request(`${this.baseUrl}/v1/events`, {
           method: "POST",
           headers: {
             "content-type": "application/json",
@@ -583,7 +657,7 @@ export class QuestKitClient {
         ...baseHeaders,
         authorization: `Bearer ${token}`,
       };
-      return this.fetchImpl(url, { ...rest, headers });
+      return this.request(url, { ...rest, headers });
     };
 
     const first = await attempt();
@@ -728,6 +802,73 @@ export class QuestKitClient {
       this.polling = null;
     }
   }
+}
+
+/**
+ * Detect whether a fetch rejection was caused by OUR timeout signal firing.
+ *
+ * We can't just look for `err.name === "AbortError"` — that would also
+ * catch caller-driven abort (e.g. host code calling `controller.abort()`
+ * to cancel on unmount), which the caller probably wants to handle
+ * differently than a server timeout. So we check two things:
+ *
+ *   1. The dedicated timeout signal we created has aborted. This is the
+ *      authoritative bit: if it fired, the fetch was aborted because of
+ *      us, regardless of which other signals may have been involved.
+ *   2. The thrown error looks like an abort (DOMException with name
+ *      "TimeoutError" / "AbortError" or a Node `AbortError`).
+ *
+ * Both conditions together mean "our timeout caused this rejection".
+ */
+function isTimeoutAbort(err: unknown, timeoutSignal: AbortSignal): boolean {
+  if (!timeoutSignal.aborted) return false;
+  if (err instanceof Error) {
+    const name = err.name;
+    if (name === "TimeoutError" || name === "AbortError") return true;
+    // DOMException with code 20 (ABORT_ERR) — the spec-compliant name on
+    // some legacy runtimes is just "AbortError" but the code is stable.
+    const maybeDom = err as { code?: number };
+    if (maybeDom.code === 20) return true;
+  }
+  return false;
+}
+
+/**
+ * Combine multiple AbortSignals into one — the returned signal aborts
+ * when ANY input signal aborts. Equivalent to `AbortSignal.any([...])`
+ * which exists in Node 20+ and modern browsers, but we polyfill for
+ * older runtimes (Workers, Safari < 17) by wiring up an internal
+ * controller.
+ *
+ * If `AbortSignal.any` exists on the runtime, defer to it for accurate
+ * `signal.reason` propagation; otherwise emit a controller-driven
+ * approximation that aborts on first input fire.
+ */
+function anyAbortSignal(signals: AbortSignal[]): AbortSignal {
+  // Prefer the standard implementation when available.
+  const native = (
+    AbortSignal as unknown as {
+      any?: (sigs: AbortSignal[]) => AbortSignal;
+    }
+  ).any;
+  if (typeof native === "function") {
+    return native.call(AbortSignal, signals);
+  }
+  const controller = new AbortController();
+  for (const s of signals) {
+    if (s.aborted) {
+      controller.abort(s.reason);
+      return controller.signal;
+    }
+    s.addEventListener(
+      "abort",
+      () => {
+        controller.abort(s.reason);
+      },
+      { once: true },
+    );
+  }
+  return controller.signal;
 }
 
 /**
