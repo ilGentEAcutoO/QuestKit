@@ -19,9 +19,27 @@ import {
 
 import { mintToken } from "./auth";
 
-const DEMO_USER_ID = "demo_user_42";
 const DEMO_APP_ID = "demo";
 const DEMO_API_BASE = "https://api.questkit.jairukchan.com";
+
+/**
+ * Resolve the demo user ID. Defaults to a stable `demo_user_42` so the
+ * "0 coin" → "+100 coin" claim demo persists across reloads, but the
+ * Playwright E2E + frontend-test sweeps need fresh users to exercise
+ * the claim flow without hitting "already claimed" idempotent replays.
+ *
+ * Override via `?user=...` query param (read once at module load — the
+ * query string never changes after navigation in this SPA). Mostly used
+ * by `apps/demo/e2e/golden-path.spec.ts` and by manual test sessions.
+ */
+function resolveDemoUserId(): string {
+  if (typeof window === "undefined") return "demo_user_42";
+  const param = new URLSearchParams(window.location.search).get("user");
+  if (param !== null && /^[\w-]{3,40}$/.test(param)) return param;
+  return "demo_user_42";
+}
+
+const DEMO_USER_ID = resolveDemoUserId();
 
 interface BootstrapState {
   kind: "idle" | "loading" | "ready" | "error";
