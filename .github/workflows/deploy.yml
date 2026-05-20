@@ -100,11 +100,18 @@ jobs:
       # Build all artifacts up front so a failure surfaces before any
       # production worker is uploaded. Docusaurus + Vite + the playground's
       # copy-embed step all need to run on the CI runner.
+      #
+      # The `...` suffix on each filter is load-bearing: it makes pnpm
+      # include each package's workspace dependencies in the build set.
+      # Without it, the demo's vite build fails to resolve
+      # `@questkit/react/styles.css` because the react package's dist/ has
+      # not been emitted on a clean CI checkout — only `pnpm test` /
+      # `pnpm typecheck` (which go through turbo) build deps locally.
       - name: Build static-asset workers
         run: |
-          pnpm --filter @questkit/demo build
-          pnpm --filter @questkit/docs build
-          pnpm --filter @questkit/playground build
+          pnpm --filter '@questkit/demo...' build
+          pnpm --filter '@questkit/docs...' build
+          pnpm --filter '@questkit/playground...' build
 
       # ─── D1 migrations ────────────────────────────────────────────────
       # `wrangler d1 migrations apply` is idempotent: it reads the
