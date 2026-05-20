@@ -34,6 +34,14 @@ import { writeEventDataPoint } from "./ae";
 import * as idem from "./idempotency";
 
 /**
+ * Per-call ceiling for any SSE_HUB DO RPC. Mirrors the constant in
+ * routes/missions.ts. See that file for the rationale; the short version is
+ * that broadcasts are best-effort, so capping at 2s lets us guarantee a
+ * wedged DO never deadlocks the worker request thread.
+ */
+const SSE_HUB_TIMEOUT_MS = 2000;
+
+/**
  * Best-effort fan-out of mission progress updates to the user's SSE_HUB
  * Durable Object. Each updated progress row becomes either a
  * `mission.completed` SDKUpdate (if the new status is "completed" or
@@ -48,6 +56,12 @@ import * as idem from "./idempotency";
  * client's SSE subscriber never saw the resulting progress changes —
  * the demo's EventLog drawer stayed empty even though missions DID
  * progress server-side. Surfaced by the live click-through test sweep.
+ *
+ * Deadlock hardening (Phase 8 / v0.1.4 TASK-001): each stub.fetch arms
+ * `AbortSignal.timeout(2000)` so a wedged DO can never hold the call. The
+ * CALLER detaches the whole `tryBroadcastProgress` invocation via
+ * `ctx.waitUntil(...)` (see `IngestEventContext.waitUntil`) so even
+ * healthy-but-slow broadcasts don't gate the ingest response.
  */
 async function tryBroadcastProgress(
   env: Env,
@@ -67,6 +81,7 @@ async function tryBroadcastProgress(
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(update),
+        signal: AbortSignal.timeout(SSE_HUB_TIMEOUT_MS),
       });
       if (resp.status !== 200) {
         console.warn(
@@ -75,6 +90,7 @@ async function tryBroadcastProgress(
       }
     }
   } catch (err) {
+    // Includes AbortError from the timeout signal.
     console.warn("[ingest] sse-hub broadcast threw, swallowed", err);
   }
 }
@@ -93,13 +109,23 @@ export interface IngestEventBody {
 }
 
 /**
- * Context the route layer can optionally pass through. Today only carries the
- * Cloudflare-detected request country so the AE write retains parity with the
- * route's prior behaviour. The RPC entrypoint passes `undefined` here — webhook
- * events arrive without a meaningful request country.
+ * Context the route layer can optionally pass through.
+ *
+ *   - `requestCountry` — Cloudflare-detected request country so the AE write
+ *     retains parity with the route's prior behaviour. The RPC entrypoint
+ *     passes `undefined` here — webhook events arrive without a meaningful
+ *     request country.
+ *   - `waitUntil` — when provided, the SSE broadcast fan-out is detached
+ *     from the response path via this callback (typically wired to
+ *     `c.executionCtx.waitUntil` for HTTP and `this.ctx.waitUntil` for the
+ *     `WorkerEntrypoint` RPC). Without it the broadcast is awaited inline,
+ *     which is fine for non-request contexts (tests, scripts) but would
+ *     hang client requests if any subscriber's writer were stalled — see
+ *     TASK-001 (Phase 8 / v0.1.4) for the regression history.
  */
 export interface IngestEventContext {
   requestCountry?: string;
+  waitUntil?: (promise: Promise<unknown>) => void;
 }
 
 /**
@@ -217,7 +243,17 @@ export async function ingestEventCore(
   // Step 10: fan out mission updates over SSE so subscribed clients see
   // live progress (this is the entire point of the SSE hub). Best-effort:
   // a hub miss must NEVER fail the ingest itself.
-  await tryBroadcastProgress(env, userId, updated);
+  //
+  // Detached via `ctx.waitUntil` when the caller supplies one (Phase 8 /
+  // v0.1.4 TASK-001). HTTP routes and the WorkerEntrypoint RPC both have
+  // an ExecutionContext to plumb in; tests/scripts that don't bother fall
+  // back to the awaited path (the test environments don't have wedged DOs
+  // so the latency cost is negligible).
+  if (ctx.waitUntil !== undefined) {
+    ctx.waitUntil(tryBroadcastProgress(env, userId, updated));
+  } else {
+    await tryBroadcastProgress(env, userId, updated);
+  }
 
   // Step 11: build the response shape, then cache if an idempotency key was
   // provided so subsequent replays return byte-identical JSON.

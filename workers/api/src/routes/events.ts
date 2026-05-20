@@ -105,13 +105,23 @@ function parseEventBody(raw: unknown): EventBody | null {
 }
 
 /**
+ * Per-call ceiling for the rate-limiter DO RPC. The limiter's check() runs
+ * a few SQLite statements on the DO's storage — well under 50ms in healthy
+ * paths. 2s is a generous upper bound that lets us fail-open on a wedged
+ * DO without ever blocking the worker request thread (Phase 8 / v0.1.4
+ * TASK-001).
+ */
+const RATE_LIMITER_TIMEOUT_MS = 2000;
+
+/**
  * Read the rate-limiter DO.
  *
  * The DO returns 200 on allow, 429 on reject (with a `Retry-After` header
  * + JSON body containing `retryAfterMs`). Any other status is unexpected —
  * we log and allow (defensive: a broken limiter shouldn't take down the
  * whole event pipeline). Network-level failures (DO unreachable, fetch
- * throws) are caught in the call-site so they don't propagate as a 500.
+ * throws, or AbortError from the timeout) are caught in the call-site so
+ * they don't propagate as a 500.
  *
  * @throws HTTPException(429) when the DO returns 429
  */
@@ -120,7 +130,9 @@ async function checkRateLimit(env: Env, userId: string): Promise<void> {
   const stub = env.RATE_LIMITER.get(id);
   let rlResp: Response;
   try {
-    rlResp = await stub.fetch("https://_/check?limit=100&window=60000");
+    rlResp = await stub.fetch("https://_/check?limit=100&window=60000", {
+      signal: AbortSignal.timeout(RATE_LIMITER_TIMEOUT_MS),
+    });
   } catch (err) {
     // Network-level failure talking to the DO — fail open (allow) so a
     // limiter outage doesn't sink the ingest pipeline. The error is logged
@@ -179,6 +191,9 @@ events.post("/", async (c) => {
   // idempotency header resolution above + the AE country lookup below); the
   // service owns the database + KV + AE machinery so the queue consumer can
   // reuse it via RPC.
+  //
+  // `waitUntil` is wired so the SSE broadcast fan-out runs detached from
+  // the response — see services/ingest.ts and TASK-001 (Phase 8 / v0.1.4).
   const cf = c.req.raw.cf as { country?: string } | undefined;
   const result = await ingestEventCore(
     c.env,
@@ -191,7 +206,10 @@ events.post("/", async (c) => {
         ? { idempotencyKey: effectiveIdemKey }
         : {}),
     },
-    cf?.country !== undefined ? { requestCountry: cf.country } : {},
+    {
+      ...(cf?.country !== undefined ? { requestCountry: cf.country } : {}),
+      waitUntil: (p) => c.executionCtx.waitUntil(p),
+    },
   );
 
   const responseBody: EventsResponse = {

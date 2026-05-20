@@ -184,7 +184,12 @@ export class ApiService extends WorkerEntrypoint<Env> {
         ? { idempotencyKey: event.idempotencyKey }
         : {}),
     };
-    const result = await ingestEventCore(this.env, body);
+    // `this.ctx.waitUntil` lets the SSE broadcast fan-out (inside
+    // `ingestEventCore`) run detached from the RPC response — same fix as
+    // the HTTP route. See Phase 8 / v0.1.4 TASK-001.
+    const result = await ingestEventCore(this.env, body, {
+      waitUntil: (p) => this.ctx.waitUntil(p),
+    });
     return { accepted: true, missionsUpdated: result.missionsUpdated };
   }
 }
