@@ -21,6 +21,7 @@ echo "[newman] running against $BASE_URL with user $USER_ID"
 # time `newman run` starts, M1 is `completed` for $USER_ID and claim succeeds.
 echo "[newman] pre-firing 3 purchase.completed events to complete M1 for $USER_ID"
 TOKEN=$(curl -fsS -X POST "$BASE_URL/v1/auth/token" \
+  -A "PostmanRuntime/7.40.0" \
   -H "content-type: application/json" \
   -d "{\"appId\":\"$APP_ID\",\"appSecret\":\"$APP_SECRET\",\"userId\":\"$USER_ID\"}" \
   | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
@@ -31,6 +32,7 @@ fi
 NOW_MS=$(($(date +%s) * 1000))
 for i in 1 2 3; do
   curl -fsS -o /dev/null -X POST "$BASE_URL/v1/events" \
+    -A "PostmanRuntime/7.40.0" \
     -H "content-type: application/json" \
     -H "authorization: Bearer $TOKEN" \
     -H "idempotency-key: ci_prefire_${USER_ID}_${i}" \
