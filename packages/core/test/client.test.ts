@@ -907,3 +907,182 @@ describe("questKitClient — error mapping", () => {
     client.destroy();
   });
 });
+
+describe("questKitClient — authedFetch shared timeout budget (TASK-005 follow-up)", () => {
+  it("honours timeoutMs as a SHARED budget across 401-retry — not 2× timeoutMs", async () => {
+    // Regression test for the "doubled budget" bug. With timeoutMs=100:
+    //   - Attempt 1 → 401 after ~50ms (consumes half the budget)
+    //   - Token refresh (cheap)
+    //   - Attempt 2 → hangs forever
+    //
+    // The contract says the WHOLE chain must reject within ~timeoutMs. A
+    // broken impl would create a fresh AbortSignal.timeout(100) for attempt
+    // 2 and reject around ~150ms total. We assert <150ms to catch that.
+    let call = 0;
+    const fetchImpl = jest
+      .fn()
+      .mockImplementation((_url: string, init?: RequestInit) => {
+        call += 1;
+        const signal = init?.signal;
+        if (call === 1) {
+          // Attempt 1: respond 401 quickly so attempt 2 can begin under the
+          // SAME budget.
+          return new Promise<Response>((resolve, reject) => {
+            const timer = setTimeout(() => {
+              resolve(jsonResponse({ error: "unauthorized" }, 401));
+            }, 50);
+            if (signal && !signal.aborted) {
+              signal.addEventListener(
+                "abort",
+                () => {
+                  clearTimeout(timer);
+                  const e = new Error("aborted-during-attempt-1");
+                  e.name = "TimeoutError";
+                  reject(e);
+                },
+                { once: true },
+              );
+            }
+          });
+        }
+        // Attempt 2: hang forever; only the SHARED abort signal can settle us.
+        return new Promise<Response>((_resolve, reject) => {
+          if (signal === undefined || signal === null) {
+            reject(
+              new Error("test setup: expected an AbortSignal on attempt 2"),
+            );
+            return;
+          }
+          if (signal.aborted) {
+            const e = new Error("already-aborted");
+            e.name = "TimeoutError";
+            reject(e);
+            return;
+          }
+          signal.addEventListener(
+            "abort",
+            () => {
+              const e = new Error("aborted-during-attempt-2");
+              e.name = "TimeoutError";
+              reject(e);
+            },
+            { once: true },
+          );
+        });
+      });
+
+    const client = makeClient(fetchImpl as unknown as typeof fetch, {
+      timeoutMs: 100,
+    });
+    const start = Date.now();
+    await expect(client.getBalances()).rejects.toMatchObject({
+      code: "timeout",
+    });
+    const elapsed = Date.now() - start;
+    // Shared budget: must reject within ~100ms (+ a small CI tolerance).
+    // A doubled budget would land near 150ms+ — we'd flag that.
+    expect(elapsed).toBeLessThan(150);
+    // And both attempts actually ran (the bug we're testing only manifests
+    // when the second attempt is reached).
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    client.destroy();
+  });
+
+  it("does not start attempt 2 if the shared budget expired during attempt 1 + refresh", async () => {
+    // Variant: attempt 1 returns 401 just as the timeout fires. The
+    // pre-attempt-2 check should short-circuit instead of spinning up a
+    // second fetch with a fresh budget.
+    let call = 0;
+    const fetchImpl = jest.fn().mockImplementation((_url: string) => {
+      call += 1;
+      // Attempt 1 returns 401 right at the edge of the budget.
+      return new Promise<Response>((resolve) => {
+        setTimeout(() => {
+          resolve(jsonResponse({ error: "unauthorized" }, 401));
+        }, 40);
+      });
+    });
+
+    // Slow getToken so the shared budget expires DURING the refresh, before
+    // attempt 2 fires.
+    const slowGetToken = (): Promise<string> =>
+      new Promise<string>((resolve) => {
+        setTimeout(() => resolve(makeFakeJwt("u")), 80);
+      });
+
+    const client = new QuestKitClient({
+      baseUrl: "https://api.example",
+      appId: "app1",
+      getToken: slowGetToken,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      storage: new MemoryStorage(),
+      timeoutMs: 100,
+    });
+    await expect(client.getBalances()).rejects.toMatchObject({
+      code: "timeout",
+    });
+    // Attempt 2 must never have started — the budget was already gone.
+    expect(call).toBe(1);
+    client.destroy();
+  });
+});
+
+describe("questKitClient — fireEvent error discrimination (TASK-005 follow-up)", () => {
+  it("throws (does NOT queue) when getTokenFn rejects with QuestKitError(config_error)", async () => {
+    // The original bare-catch silently queued config errors — a
+    // programmer-visible bug got hidden behind a queued: true result. The
+    // tightened catch must rethrow.
+    const fetchImpl = jest.fn(); // should never be called
+    const client = new QuestKitClient({
+      baseUrl: "https://api.example",
+      appId: "app1",
+      getToken: () => {
+        throw new QuestKitError("invalid token", "config_error");
+      },
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      storage: new MemoryStorage(),
+    });
+    await expect(
+      client.fireEvent({ name: "x", payload: {} }),
+    ).rejects.toMatchObject({
+      code: "config_error",
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(client.queueDepth()).toBe(0);
+    client.destroy();
+  });
+
+  it("throws (does NOT queue) when response body is not valid JSON", async () => {
+    // The server returned a 200 with garbage — that's a programmer-visible
+    // contract violation (server bug, or wrong endpoint pointed at). The
+    // SDK must surface it instead of queueing forever.
+    //
+    // Note: cross-realm `instanceof SyntaxError` is unreliable in jsdom
+    // (Response.json constructs the error in its own realm). Match by
+    // .name instead — that's what consumers would do anyway.
+    const fetchImpl = jest
+      .fn()
+      .mockResolvedValue(new Response("nope", { status: 200 }));
+    const client = makeClient(fetchImpl as unknown as typeof fetch);
+    await expect(
+      client.fireEvent({ name: "x", payload: {} }),
+    ).rejects.toMatchObject({ name: "SyntaxError" });
+    // The malformed-body case is NOT retryable — must not enqueue.
+    expect(client.queueDepth()).toBe(0);
+    client.destroy();
+  });
+
+  it("still queues genuine network-level failures (TypeError from fetch)", async () => {
+    // Regression guard: the new discriminator must still treat real network
+    // failures (DNS, disconnect — surfaced as TypeError in WHATWG fetch) as
+    // retryable. Without this assertion, an over-tight discriminator would
+    // turn the offline case into a hard throw and break the queue contract.
+    const networkError = new TypeError("Failed to fetch");
+    const fetchImpl = jest.fn().mockRejectedValue(networkError);
+    const client = makeClient(fetchImpl as unknown as typeof fetch);
+    const result = await client.fireEvent({ name: "x", payload: {} });
+    expect(result.queued).toBe(true);
+    expect(result.accepted).toBe(false);
+    client.destroy();
+  });
+});
