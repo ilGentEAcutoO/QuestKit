@@ -128,12 +128,16 @@ describe("recommendedMissions", () => {
     await waitFor(() =>
       expect(screen.getByText(/crushing daily logins/i)).toBeInTheDocument(),
     );
-    // Both mission cards rendered (heading by title).
+    // Both mission cards rendered (heading by title). Each MissionCard depends
+    // on its own getMission() promise resolving, so use findByRole (which
+    // retries until found or 1000ms timeout) instead of getByRole — otherwise
+    // CI runners with slower CPU can lose the race between reason-render and
+    // card-render and intermittently fail this assertion.
     expect(
-      screen.getByRole("heading", { name: /alpha quest/i }),
+      await screen.findByRole("heading", { name: /alpha quest/i }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("heading", { name: /beta quest/i }),
+      await screen.findByRole("heading", { name: /beta quest/i }),
     ).toBeInTheDocument();
   });
 
