@@ -231,7 +231,112 @@ can deploy `--dry-run` on the free tier to confirm the config is valid, but
 production deploys of the consumer Worker require upgrading at
 <https://dash.cloudflare.com/?to=/:account/workers/plans>.
 
-## 8. Next steps
+## 8. GitHub Actions CI/CD deploy
+
+Once your fork is set up (you've run `setup.sh` once, the live URL responds
+on `/v1/health`, and `pnpm test` is green), you can wire automatic deploys
+on every push to `main` via `.github/workflows/deploy.yml`. The workflow is
+already committed; you only need to add the GitHub secrets it reads.
+
+### 8.1 Trigger model
+
+`deploy.yml` triggers on `workflow_run` after the `CI` workflow (lint /
+typecheck / test / sonar / newman) succeeds on `main`. That guarantees no
+deploy ever ships a broken commit. A `workflow_dispatch` trigger is also
+wired so a maintainer can re-deploy from the GitHub UI without pushing a
+new commit (useful after rotating a secret).
+
+The workflow does, in order:
+
+1. Checkout the exact commit CI ran against.
+2. `pnpm install --frozen-lockfile`, regenerate worker types, build
+   `apps/demo`, `apps/docs`, `apps/playground`.
+3. `wrangler d1 migrations apply questkit-d1-main --remote --env production`.
+4. Deploy all six workers in dependency order: api → consumer → relay →
+   demo → docs → playground.
+5. `curl /v1/health` on the api worker and `curl /` on the demo apex; both
+   must return 200 within three 10s-spaced retries.
+
+Concurrency is fenced to `deploy-production` so two deploys can never race
+each other into Cloudflare's worker-upload API (it 409s on concurrent
+deploys of the same worker name).
+
+### 8.2 Required GitHub Actions secrets
+
+Register these under `Settings → Secrets and variables → Actions → New
+repository secret`:
+
+| Secret name            | What it is                                                                                                      | How to generate                                                      |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `CLOUDFLARE_API_TOKEN` | Cloudflare API token used by `wrangler deploy` and `d1 migrations apply`.                                       | <https://dash.cloudflare.com/profile/api-tokens> — see scopes below. |
+| `JWT_SECRET`           | HS256 signing key for `/v1/auth/token`. Must match what's on the api worker.                                    | `openssl rand -base64 48`                                            |
+| `APP_SECRET`           | Shared secret between demo's `/api/token` proxy and api's `/v1/auth/token`. Same value on both workers.         | `openssl rand -base64 48`                                            |
+| `WEBHOOK_HMAC_SECRET`  | HMAC-SHA256 key for inbound webhook signature verification. Same value on relay and api.                        | `openssl rand -base64 48`                                            |
+| `QUESTKIT_APP_SECRET`  | Same value as `APP_SECRET`. Used by the existing Newman contract job in `ci.yml` (kept for historical reasons). | Same as `APP_SECRET` — paste twice.                                  |
+| `SONAR_TOKEN`          | SonarCloud token. Used by the SonarCloud scan job in `ci.yml`.                                                  | <https://sonarcloud.io/account/security>                             |
+
+> `CLOUDFLARE_ACCOUNT_ID` is **NOT** a secret. It's hard-coded into
+> `deploy.yml` as `env.CLOUDFLARE_ACCOUNT_ID` and is the same account ID
+> printed in every `wrangler deploy` log. Forkers must edit this value in
+> `deploy.yml` to their own account ID before the workflow will deploy
+> against their tenant.
+
+### 8.3 Cloudflare API token scopes
+
+The `CLOUDFLARE_API_TOKEN` needs only:
+
+- **Account → Workers Scripts → Edit** — upload + publish all six workers.
+- **Account → D1 → Edit** — run `wrangler d1 migrations apply`.
+- **Account → Account Settings → Read** — required by `wrangler deploy`
+  for account validation.
+- **Zone → Workers Routes → Edit** (on the zone owning your custom
+  domains) — needed for `routes` + `custom_domain` blocks. Skip if you
+  deploy to `*.workers.dev` only.
+
+Do **NOT** grant `Account → Account Settings → Edit` or any zone-level
+write scopes beyond `Workers Routes`. The token never needs to mutate
+account-level config.
+
+### 8.4 What gets committed vs. what stays a secret
+
+| Where                                            | What lives there                                                                                                                                                 |
+| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `workers/api/wrangler.jsonc` `env.production`    | Real D1 + KV UUIDs, R2 bucket name, route pattern. UUIDs are not secrets.                                                                                        |
+| `workers/api/wrangler.dev.jsonc` (gitignored)    | Personal Cloudflare resources for local dev. Created by `./scripts/setup.sh`.                                                                                    |
+| Cloudflare secrets store (`wrangler secret put`) | `JWT_SECRET`, `APP_SECRET`, `WEBHOOK_HMAC_SECRET` on every worker that needs them.                                                                               |
+| GitHub Actions secrets                           | Same three secrets, plus `CLOUDFLARE_API_TOKEN`. The workflow uses `cloudflare/wrangler-action`'s `secrets:` input to push them into the worker on every deploy. |
+
+This split keeps three properties true at once:
+
+- A clean checkout can `wrangler deploy --env production` if you set the
+  three GitHub secrets (zero ID injection required).
+- A clean checkout reveals the production UUIDs publicly, which is fine —
+  they're already visible in every CI log and dashboard URL.
+- The actual signing keys (the three secrets) never enter source control
+  or CI logs.
+
+### 8.5 Verifying a deploy
+
+After `deploy.yml` finishes, the workflow log ends with:
+
+```text
+[api /v1/health] OK (200) on attempt 1
+[demo apex] OK (200) on attempt 1
+```
+
+If either check fails three times in a row, the deploy step exits non-zero
+and you'll see a red X on the commit. Common causes:
+
+- A secret is missing or stale. Check `wrangler secret list --name
+questkit-worker-api`.
+- D1 migrations failed mid-way. Check the migrations apply log for the
+  exact error; re-running the workflow is safe because migrations are
+  idempotent.
+- A binding ID in `env.production` no longer exists in the Cloudflare
+  account (e.g. somebody deleted the KV namespace). Recreate via
+  `./scripts/setup.sh` and update `wrangler.jsonc` accordingly.
+
+## 9. Next steps
 
 - Read the [README](../README.md) for the elevator pitch and embedded demo
   links.

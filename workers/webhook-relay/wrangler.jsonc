@@ -20,14 +20,38 @@
 
   // Custom domain. CF auto-provisions DNS + SSL cert on first deploy
   // against a zone the account owns (jairukchan.com on SORNKan Co., Ltd.).
+  // Top-level routes apply when deploying without `--env`. CI deploys via
+  // `--env production` use env.production.routes below.
   "routes": [
     {
       "pattern": "webhook.questkit.jairukchan.com",
       "custom_domain": true
     }
-  ]
+  ],
 
   // Secret `WEBHOOK_HMAC_SECRET` is set out-of-band via
   // `wrangler secret put WEBHOOK_HMAC_SECRET --name questkit-worker-webhook-relay`
   // and never committed. The placeholder is documented in .dev.vars.example.
+  // In CI, the secret is injected via the `secrets:` input of
+  // cloudflare/wrangler-action with env-var `WEBHOOK_HMAC_SECRET` sourced from
+  // a GitHub Actions secret of the same name.
+  "env": {
+    "production": {
+      "name": "questkit-worker-webhook-relay",
+      "routes": [
+        {
+          "pattern": "webhook.questkit.jairukchan.com",
+          "custom_domain": true
+        }
+      ],
+      "queues": {
+        "producers": [
+          {
+            "binding": "WEBHOOK_QUEUE",
+            "queue": "questkit-queue-webhooks"
+          }
+        ]
+      }
+    }
+  }
 }

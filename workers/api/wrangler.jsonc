@@ -6,9 +6,35 @@
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // CONFIG LAYOUT — Phase 8 / TASK-007
+  //
+  // The top-level block intentionally keeps `<set-per-env>` placeholders so a
+  // fresh fork can dry-run / typecheck without leaking IDs and so the repo
+  // stays self-documenting about which fields are environment-scoped.
+  //
+  // For real deploys, two paths exist:
+  //
+  //   1. CI/Production: `wrangler deploy --env production` (see
+  //      .github/workflows/deploy.yml). The `env.production` block below
+  //      carries the real D1 / KV / R2 / DO config for `api.questkit.jairukchan.com`.
+  //      D1 + KV UUIDs are public identifiers, not secrets — committing them
+  //      is safe and lets a CI deploy work on a clean checkout.
+  //
+  //   2. Local dev: `wrangler dev --config wrangler.dev.jsonc` (gitignored
+  //      overlay). A developer who wants to point at their OWN Cloudflare
+  //      account creates a personal `wrangler.dev.jsonc` via
+  //      `./scripts/setup.sh` and runs the package.json scripts which already
+  //      pass `--config wrangler.dev.jsonc` where appropriate.
+  //
+  // Wrangler does NOT auto-inherit bindings from the top level into
+  // `env.production` (verified against wrangler@4.92.0 — it warns about
+  // top-level vars/bindings not present in the env subblock). The
+  // `env.production` block must therefore redeclare every binding the
+  // top-level has, plus the production-only `routes` entry.
+  // ─────────────────────────────────────────────────────────────────────────
+
   // D1 — source of truth for missions / progress / balances / events / campaigns.
-  // database_id is a placeholder; real values live in gitignored wrangler.dev.jsonc
-  // for local, and in GitHub Actions secrets for CI deploys.
   "d1_databases": [
     {
       "binding": "DB",
@@ -48,9 +74,8 @@
   },
 
   // Durable Objects — per-JWT sliding-window rate limiter and per-user SSE
-  // fanout hub. Classes are stub-exported from src/index.ts today; full
-  // implementation lands in TASK-011. The migrations[].new_sqlite_classes
-  // entry is required since SQLite-DOs became the default (plan amendment A5).
+  // fanout hub. The migrations[].new_sqlite_classes entry is required since
+  // SQLite-DOs became the default (plan amendment A5).
   "durable_objects": {
     "bindings": [
       { "name": "RATE_LIMITER", "class_name": "RateLimiter" },
@@ -72,18 +97,83 @@
     }
   ],
 
-  // Workers AI — recommendations via @cf/meta/llama-3.1-8b-instruct-fast
-  // (the base llama-3.1-8b-instruct model deprecates 2026-05-30 per plan
-  // amendment A8). No resource to create; binding is the API surface.
+  // Workers AI — recommendations via @cf/meta/llama-3.1-8b-instruct-fast.
   "ai": { "binding": "AI" },
 
   // Plain (non-secret) vars. `ALLOWED_ORIGINS` is a comma-separated list of
   // full origins allowed to use the cookie-based auth path in `requireAuth`
-  // (see apps/docs/docs/api/auth.md → "Cookie-based auth"). Empty placeholder
-  // here — operators override per-env via `wrangler.dev.jsonc` (local) or
-  // `wrangler.toml`/CI vars (staging/production). Header-Bearer callers
-  // (SDK, demo, Newman) are unaffected by this value.
+  // (see apps/docs/docs/api/auth.md → "Cookie-based auth"). Header-Bearer
+  // callers (SDK, demo, Newman) are unaffected by this value.
   "vars": {
     "ALLOWED_ORIGINS": ""
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // env.production — used by CI deploys via `wrangler deploy --env production`.
+  // D1/KV UUIDs are not secrets; committing them lets CI deploy on a clean
+  // checkout without out-of-band injection. JWT_SECRET / APP_SECRET /
+  // WEBHOOK_HMAC_SECRET are still injected via `wrangler secret put` (out of
+  // band of source control) and set in CI via the `secrets:` input of
+  // cloudflare/wrangler-action.
+  // ─────────────────────────────────────────────────────────────────────────
+  "env": {
+    "production": {
+      "name": "questkit-worker-api",
+      "routes": [
+        {
+          "pattern": "api.questkit.jairukchan.com",
+          "custom_domain": true
+        }
+      ],
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "questkit-d1-main",
+          "database_id": "b0d9505b-52c5-499b-9251-e02dd902daea"
+        }
+      ],
+      "kv_namespaces": [
+        {
+          "binding": "CACHE",
+          "id": "e8a8b52a5b3a472ab5b3af1d9946e2a7"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "ASSETS_R2",
+          "bucket_name": "questkit-r2-assets"
+        }
+      ],
+      "queues": {
+        "producers": [
+          {
+            "binding": "WEBHOOK_QUEUE",
+            "queue": "questkit-queue-webhooks"
+          }
+        ]
+      },
+      "durable_objects": {
+        "bindings": [
+          { "name": "RATE_LIMITER", "class_name": "RateLimiter" },
+          { "name": "SSE_HUB", "class_name": "SSEHub" }
+        ]
+      },
+      "migrations": [
+        {
+          "tag": "v1",
+          "new_sqlite_classes": ["RateLimiter", "SSEHub"]
+        }
+      ],
+      "analytics_engine_datasets": [
+        {
+          "binding": "EVENTS_AE",
+          "dataset": "questkit_events"
+        }
+      ],
+      "ai": { "binding": "AI" },
+      "vars": {
+        "ALLOWED_ORIGINS": "https://questkit.jairukchan.com,https://docs.questkit.jairukchan.com,https://play.questkit.jairukchan.com"
+      }
+    }
   }
 }

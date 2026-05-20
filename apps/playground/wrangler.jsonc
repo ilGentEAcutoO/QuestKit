@@ -23,5 +23,24 @@
       "pattern": "play.questkit.jairukchan.com",
       "custom_domain": true
     }
-  ]
+  ],
+
+  // env.production mirrors top-level for uniform `--env production` CI
+  // deploys (see .github/workflows/deploy.yml). Wrangler does not inherit
+  // bindings/routes into env subblocks.
+  "env": {
+    "production": {
+      "name": "questkit-worker-play",
+      "assets": {
+        "directory": "./public",
+        "not_found_handling": "404-page"
+      },
+      "routes": [
+        {
+          "pattern": "play.questkit.jairukchan.com",
+          "custom_domain": true
+        }
+      ]
+    }
+  }
 }
