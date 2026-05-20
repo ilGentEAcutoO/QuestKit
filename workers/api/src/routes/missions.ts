@@ -183,6 +183,16 @@ missions.get("/:id", async (c) => {
 });
 
 /**
+ * Per-call ceiling for any SSE_HUB DO RPC. The DO's own broadcast caps each
+ * writer at 1s, and the parallel `Promise.allSettled` waits for all writers,
+ * so 2s is a comfortable upper bound on a healthy DO. If the DO itself is
+ * wedged (workerd quirk, OOM, etc.) this `AbortSignal.timeout` ensures the
+ * worker request thread never deadlocks waiting on the RPC — the broadcast
+ * is best-effort by contract, so timing it out is safe.
+ */
+const SSE_HUB_TIMEOUT_MS = 2000;
+
+/**
  * Attempt an SSE broadcast for the claim. Best-effort: any failure is logged
  * but does NOT propagate — the claim already succeeded. TASK-012's SDK fills
  * the gap on reconnect (the SDK polls /v1/missions and /v1/balance on a
@@ -192,6 +202,13 @@ missions.get("/:id", async (c) => {
  * — the SDKUpdate union doesn't have a dedicated `mission.claimed` variant,
  * so we split the semantic into the two closest existing variants. Flag
  * documented in the route's file-level JSDoc.
+ *
+ * Deadlock hardening (Phase 8 / v0.1.4 TASK-001):
+ *   Both stub.fetch calls arm `AbortSignal.timeout(2000)` so a wedged DO
+ *   never holds the broadcast. The CALLER (the claim route) detaches the
+ *   whole tryBroadcastClaim call via `c.executionCtx.waitUntil(...)` so
+ *   even broadcast latency in the healthy-but-slow case doesn't gate the
+ *   client response.
  */
 async function tryBroadcastClaim(
   env: Env,
@@ -211,6 +228,7 @@ async function tryBroadcastClaim(
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(rewardUpdate),
+      signal: AbortSignal.timeout(SSE_HUB_TIMEOUT_MS),
     });
     if (r1.status !== 200) {
       console.warn(`[claim] sse-hub returned unexpected status ${r1.status}`);
@@ -224,13 +242,16 @@ async function tryBroadcastClaim(
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(balanceUpdate),
+        signal: AbortSignal.timeout(SSE_HUB_TIMEOUT_MS),
       });
       if (r2.status !== 200) {
         console.warn(`[claim] sse-hub returned unexpected status ${r2.status}`);
       }
     }
   } catch (err) {
-    // Network-level failures: we never let the broadcast take down the claim.
+    // Network-level failures (incl. AbortError from the timeout): we never
+    // let the broadcast take down the claim. The DB UPSERT in
+    // `claimMissionDb` has already committed at this point.
     console.warn("[claim] sse-hub broadcast threw, swallowed", err);
   }
 }
@@ -283,13 +304,22 @@ missions.post("/:id/claim", async (c) => {
 
   // Step 3 — broadcast on a fresh claim only. Idempotent replays should NOT
   // re-broadcast (the original broadcast already fired).
+  //
+  // Detached via `c.executionCtx.waitUntil` (Phase 8 / v0.1.4 TASK-001):
+  // the broadcast is best-effort — the D1 transaction in `claimMissionDb`
+  // has already committed by this point. Holding the response on the SSE
+  // RPC was the root cause of the "claim hangs forever" bug; with
+  // `waitUntil` the broadcast finishes after the response is sent, and the
+  // request returns as soon as the KV cache write below settles.
   if (outcome.kind === "claimed_now") {
-    await tryBroadcastClaim(
-      c.env,
-      userId,
-      missionId,
-      outcome.reward,
-      outcome.balance,
+    c.executionCtx.waitUntil(
+      tryBroadcastClaim(
+        c.env,
+        userId,
+        missionId,
+        outcome.reward,
+        outcome.balance,
+      ),
     );
   }
 
