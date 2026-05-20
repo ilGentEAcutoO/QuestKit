@@ -38,6 +38,7 @@ build/
 .nyc_output/
 test-results/
 playwright-report/
+.playwright-mcp/
 postman/newman-report.json
 
 # Editor / OS
