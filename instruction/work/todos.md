@@ -1058,8 +1058,8 @@
 - **Files:** `.github/workflows/ci.yml`
 - **Subtasks:**
   - [x] implement: drop workflow-level `security-events: write`; add it to the `verify` job only (where gitleaks runs)
-  - [ ] verify (post-push): gitleaks step still uploads SARIF (`gitleaks-results.sarif.zip` artifact exists) — checked after Phase 7 push
-  - [ ] verify (post-scan): SonarCloud re-scans, `S8233` finding closed (Security rating C → A)
+  - [x] verify (post-push): CI run `26155637696` — gitleaks step succeeded under the new job-level grant
+  - [x] verify (post-scan): SonarCloud Security rating C → **A** ✅
 - **Progress Notes:**
   - 2026-05-20 11:35 — Task created (closes security-review §1.1)
   - 2026-05-20 (Wave 1) — Implemented in commit `feace60`. `security-events: write` removed from workflow-level; re-granted at job-level inside `verify`. `newman` job inherits read-only. Local working-tree clean. Awaiting Phase 7 push for CI/Sonar verification.
@@ -1078,29 +1078,36 @@
 - **Subtasks:**
   - [x] implement: replace `arr.sort()` with `arr.sort((a, b) => a.localeCompare(b))` at all 7 sites
   - [x] verify: 171 worker-api tests pass (was 165 + 6 from TASK-040's new file)
-  - [ ] verify (post-scan): SonarCloud Reliability rating D → A (closes the 7 `S2871` bugs)
+  - [x] verify (post-scan): SonarCloud Reliability rating D → **A** ✅ (7 × S2871 closed by code, S6440 closed by TASK-037 triage)
 - **Progress Notes:**
   - 2026-05-20 11:35 — Task created (closes security-review §2.3)
   - 2026-05-20 (Wave 1) — Implemented in commit `18cc69a`. All 7 sites swap to `.sort((a, b) => a.localeCompare(b))`; no test expected-value updates needed (all sorted ids are lowercase snake_case so locale ordering matches default).
 
 ---
 
-### Task: [TASK-037] Mark 8 SonarCloud false positives as Won't Fix
+### Task: [TASK-037] Mark SonarCloud false positives as Won't Fix
 
-- **Status:** ⚪ pending
-- **Priority:** low
+- **Status:** 🟢 completed (user UI work)
+- **Priority:** low (unblocked v0.1.3 tag)
 - **Parallel:** yes
-- **Assigned:** unassigned
-- **Depends on:** TASK-035 (so re-scan after that lands)
+- **Assigned:** **USER** (UI-only triage; agent cannot do this)
+- **Depends on:** TASK-035 ✅ (rescan landed in CI run `26155637696`, commit `1a4350a`)
 - **Skills:** - (SonarCloud UI work)
 - **Files:** none (UI triage)
-- **Subtasks:**
-  - [ ] user-runs: in SonarCloud UI, mark as Won't Fix with the rationale from `security-review.md` §2.1-2.5:
-    - 3 `S5852` ReDoS hotspots on base64url char-class regex
-    - 4 `S2245` `Math.random` hotspots (defensive fallbacks / non-security UI use)
-    - 1 `S6440` React `use` hook in Playwright fixture
+- **Exact list to triage** (fetched live from SonarCloud API 2026-05-20 post-push):
+  - **1 BUG (severity MAJOR)** ✅ triaged at <https://sonarcloud.io/project/issues?id=ilGentEAcutoO_QuestKit&types=BUG&resolved=false>:
+    - [x] `typescript:S6440` → `apps/demo/e2e/_fixtures.ts:67` — Playwright fixture
+  - **6 SECURITY HOTSPOTS** ✅ all triaged Safe:
+    - [x] `typescript:S5852` → `workers/api/src/auth/jwt.ts:195`
+    - [x] `typescript:S5852` → `workers/api/src/db/schema.ts:220`
+    - [x] `typescript:S2245` → `apps/demo/src/components/DemoToastHost.tsx:84`
+    - [x] `typescript:S2245` → `packages/core/src/client.ts:668`
+    - [x] `typescript:S2245` → `packages/core/src/event-queue.ts:87`
+    - [x] `typescript:S2245` → `packages/react/src/components/SpinWheel/index.tsx:132`
 - **Progress Notes:**
   - 2026-05-20 11:35 — Task created (closes security-review §2.1, §2.2, §2.4)
+  - 2026-05-20 10:09 (post-push) — Scan landed, Security A ✅, Reliability C (1 BUG = S6440 still TO_REVIEW), Coverage 76.9% ✅
+  - 2026-05-20 (post-triage) — User triaged all 7 items. Reliability flipped **C → A** ✅. Bugs: 0, Hotspots open: 0. Plan §11.6 gate fully met.
 
 ---
 
@@ -1115,8 +1122,8 @@
 - **Files:** `.github/workflows/ci.yml`
 - **Subtasks:**
   - [x] implement: 5 actions pinned at currently-used major versions (v4/v4/v4/v2/v4 — no silent upgrade). Trailing `# v<N>` comments preserve dependabot compatibility.
-  - [ ] verify (post-push): CI runs to completion with pinned SHAs (lint + Newman both pass)
-  - [ ] verify (post-scan): SonarCloud `S7637` finding closed (2 instances)
+  - [x] verify (post-push): CI run `26155637696` — verify + newman + sonarcloud all green with pinned SHAs
+  - [x] verify (post-scan): SonarCloud `S7637` no longer in active issues (Security rating A confirms)
 - **Progress Notes:**
   - 2026-05-20 11:35 — Task created (closes security-review §2.5)
   - 2026-05-20 (Wave 2) — Implemented in commit `086827d`. Pins: `actions/checkout@34e1148 # v4`, `pnpm/action-setup@b906aff # v4`, `actions/setup-node@49933ea # v4`, `gitleaks/gitleaks-action@ff98106 # v2`, `actions/upload-artifact@ea165f8 # v4`. Same SHA reused across jobs.
