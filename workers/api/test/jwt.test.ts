@@ -64,9 +64,16 @@ describe("jwt.verify (errors)", () => {
   it("rejects with JwtError(invalid_signature) when the signature is tampered", async () => {
     const token = await sign(makePayload(), SECRET);
     const [h, p] = token.split(".");
-    // Flip the last char of the sig to force a mismatch.
     const sig = token.split(".")[2]!;
-    const tamperedSig = sig.slice(0, -1) + (sig.slice(-1) === "A" ? "B" : "A");
+    // Flip the FIRST char of the sig — not the last. A base64url-encoded
+    // HMAC-SHA256 signature is 43 chars (32 bytes × 8 bits ÷ 6 bits/char,
+    // rounded up). The last char encodes only 2 meaningful bits + 4 unused
+    // bits, so flipping it can leave the decoded 32 bytes identical and the
+    // verify call still succeeds — the test that flipped the last char was
+    // intermittently flaky in CI for exactly this reason. The first char
+    // always sits in a fully-used byte position, so flipping it always
+    // changes the decoded sig.
+    const tamperedSig = (sig.charAt(0) === "A" ? "B" : "A") + sig.slice(1);
     const tampered = `${h}.${p}.${tamperedSig}`;
     await expect(verify(tampered, SECRET)).rejects.toMatchObject({
       name: "JwtError",
