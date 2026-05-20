@@ -65,7 +65,18 @@ export interface FlushResult {
   dropped: number;
 }
 
-const DEFAULT_STORAGE_KEY = "qk:event-queue";
+/**
+ * Default localStorage key the EventQueue persists under.
+ *
+ * Exported because consumers that wipe local state out-of-band (e.g. the
+ * demo's "Reset user" devtool) need a stable handle to remove the queue
+ * alongside their own keys. Without this, a reset would leave the queue
+ * to re-hydrate on next page load and silently replay events against the
+ * freshly-wiped server (see TASK-003 follow-up). Callers that override
+ * `EventQueueOpts.storageKey` must track their own custom key.
+ */
+export const EVENT_QUEUE_STORAGE_KEY = "qk:event-queue";
+const DEFAULT_STORAGE_KEY = EVENT_QUEUE_STORAGE_KEY;
 const DEFAULT_MAX_QUEUE = 100;
 const DEFAULT_MAX_ATTEMPTS = 5;
 const DEFAULT_BASE_BACKOFF_MS = 1000;

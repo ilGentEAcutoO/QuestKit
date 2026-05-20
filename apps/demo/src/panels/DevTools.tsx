@@ -16,6 +16,7 @@
  *   - Simulate time: bumps a fake "demo clock" displayed in the tray
  *     (visual only — real time-simulation belongs to TASK-029+).
  */
+import { EVENT_QUEUE_STORAGE_KEY } from "@questkit/core";
 import { useQuestKit } from "@questkit/react";
 import { motion } from "framer-motion";
 import { type ReactElement, useCallback, useEffect, useState } from "react";
@@ -59,7 +60,17 @@ const THEMES: ThemePreset[] = [
   },
 ];
 
-const STORAGE_KEYS_TO_CLEAR = ["qk-demo-daily-streak", "qk-spin-demo-spin"];
+// EVENT_QUEUE_STORAGE_KEY is included so the SDK's persisted event queue
+// is cleared at reset time. Without this, queued events would re-hydrate
+// after the page reload and fire against the freshly-wiped server — the
+// server's `idem:${userId}:*` KV is also wiped by /v1/demo/reset, so the
+// replays would NOT be detected as duplicates and would silently re-populate
+// mission progress + balances (defeating the reset).
+const STORAGE_KEYS_TO_CLEAR = [
+  "qk-demo-daily-streak",
+  "qk-spin-demo-spin",
+  EVENT_QUEUE_STORAGE_KEY,
+];
 const THEME_STORAGE_KEY = "qk-theme";
 
 function readInitialTheme(): ThemeKey {
