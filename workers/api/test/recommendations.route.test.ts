@@ -20,15 +20,17 @@
  *   3. 200 — empty active-missions short-circuit (route returns before
  *      touching env.AI)
  *
- * The remaining route behaviors (happy / cache / 502 malformed / 503 outage)
- * all hit `env.AI` via the service. `vi.mock()` cannot reach into the
- * workerd isolate where the route's bundled code lives, so those paths are
- * covered exclusively by `test/ai.service.test.ts`, which constructs a
- * hand-rolled `Pick<Env, "AI" | "CACHE">` stub and tests
- * `recommendMissions` end-to-end. The route is a thin shell around that
- * function — its branches are: load → short-circuit-or-call → translate
- * thrown error to HTTP status. The translation logic is small enough that
- * its inversion-of-control is covered by inspection.
+ * The remaining route behaviors (happy / cache / fallback on malformed
+ * response / fallback on binding outage) all hit `env.AI` via the service.
+ * `vi.mock()` cannot reach into the workerd isolate where the route's
+ * bundled code lives, so those paths are covered exclusively by
+ * `test/ai.service.test.ts`, which constructs a hand-rolled
+ * `Pick<Env, "AI" | "CACHE">` stub and tests `recommendMissions` end-to-end.
+ * The route is a thin shell around that function — its branches are:
+ * load → short-circuit-or-call → surface `result.fallback` flag verbatim
+ * or translate a thrown binding error into the same fallback shape (always
+ * HTTP 200). Phase 8 / v0.1.4 TASK-002 removed the 502 / 503 status paths
+ * entirely — they would only leak deprecated-model bugs to end users.
  */
 import { env, SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";

@@ -106,12 +106,22 @@ export interface CampaignDetail {
  * `/v1/recommendations` route response. `cached` indicates the response was
  * served from the server-side KV cache (no AI inference); `count` is the
  * length of `missionIds` after hallucination filtering.
+ *
+ * Phase 8 / v0.1.4 (TASK-002): the route now degrades gracefully when the
+ * Workers AI binding returns a malformed response or is unavailable —
+ * `fallback: true` signals this. Consumers should render a tasteful
+ * empty-state ("AI picks unavailable right now") when set. On a successful
+ * AI call the field is omitted entirely, so existing consumers that ignore
+ * it continue to work — `missionIds` will simply be `[]` and the existing
+ * empty-state branch covers it.
  */
 export interface RecommendationsResult {
   missionIds: string[];
   reason: string;
   cached: boolean;
   count: number;
+  /** Optional — `true` when the AI was unavailable / malformed. */
+  fallback?: boolean;
 }
 
 interface MintTokenInput {
@@ -477,9 +487,13 @@ export class QuestKitClient {
    * mount in the same render pass.
    *
    * GET /v1/recommendations
-   *   200: { missionIds, reason, cached, count }
-   *   502: { error: "ai_response_malformed" } — LLM returned non-JSON
-   *   503: { error: "ai_unavailable" }       — AI binding outage
+   *   200 (happy):    { missionIds, reason, cached, count }
+   *   200 (fallback): { missionIds: [], reason, cached: false, count: 0,
+   *                     fallback: true }  ← AI unavailable / malformed
+   *
+   * Phase 8 / v0.1.4: the route no longer returns 502 / 503 for AI failures;
+   * it returns a fallback shape with HTTP 200 so the UI can render a
+   * tasteful empty-state rather than a red error.
    */
   async getRecommendations(): Promise<RecommendationsResult> {
     this.ensureAlive();

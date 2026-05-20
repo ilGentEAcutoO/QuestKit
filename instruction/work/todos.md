@@ -1,6 +1,6 @@
 # QuestKit — Active Tasks (Phase 8 / v0.1.4)
 
-> Last updated: 2026-05-20 18:20
+> Last updated: 2026-05-20 19:25
 > Plan: [`plan.md`](./plan.md) · Requirements: [`requirements.md`](./requirements.md)
 > Predecessor archived at `../archive/001-phase-7-security-hardening-v0.1.3/`
 
@@ -32,25 +32,32 @@
 
 ### Task: [TASK-002] Fix AI recommendations 502 envelope mismatch
 
-- **Status:** ⚪ pending
+- **Status:** 🟢 completed
 - **Priority:** high
 - **Parallel:** yes
-- **Assigned:** unassigned
+- **Assigned:** worktree `task-002-ai-envelope`
 - **Depends on:** -
 - **Skills:** workflow-work, git-commit, deploy
 - **Files:**
   - `workers/api/src/services/ai.ts`
   - `workers/api/src/routes/recommendations.ts`
   - `packages/react/src/components/RecommendedMissions/index.tsx`
+  - `packages/core/src/client.ts` (public `RecommendationsResult` type extended with optional `fallback?: boolean`)
+  - `workers/api/test/ai.service.test.ts`
+  - `packages/react/test/components/RecommendedMissions.test.tsx`
+  - `apps/docs/docs/api/recommendations.md`
+  - `apps/docs/docs/api/overview.md`
+  - `apps/docs/docs/react/components.mdx`
 - **Subtasks:**
-  - [ ] implement: accept 3 envelope shapes — `{response: string}`, `{result: object}`, raw object — normalize before `tryParseJson`
-  - [ ] implement: on parse failure, return `{ fallback: true, items: [] }` instead of throwing
-  - [ ] implement: `recommendations.ts` returns 200 (not 502) with `fallback: true` + `reason`
-  - [ ] implement: `<RecommendedMissions>` renders graceful empty-state for fallback (no raw error code)
-  - [ ] test: ai.test.ts covers all 3 envelope shapes
-  - [ ] test: RecommendedMissions Storybook story for fallback state
+  - [x] implement: accept 3 envelope shapes — `{response: string}`, `{result: object}`, raw object — normalize before `tryParseJson` (via new `normalizeAiEnvelope`)
+  - [x] implement: on parse failure, return `{ fallback: true, missionIds: [] }` instead of throwing
+  - [x] implement: `recommendations.ts` returns 200 (not 502/503) with `fallback: true` + `reason`; AI binding outages also fold into the same 200 fallback
+  - [x] implement: `<RecommendedMissions>` renders graceful empty-state for fallback (no raw error code)
+  - [x] test: ai.service.test.ts covers all 3 envelope shapes + null-result `.response` fall-through + fallback no-throw + cache-miss-on-fallback
+  - [x] test: RecommendedMissions.test.tsx covers fallback empty-state, no leaked error codes, and suppression of stale ids
 - **Progress Notes:**
   - 2026-05-20 18:20 — Created. Browser-confirmed: `GET /v1/recommendations` → 502 `ai_response_malformed` on live demo.
+  - 2026-05-20 19:25 — Implemented in worktree `task-002-ai-envelope`. 184 worker-api tests pass (incl. 6 new envelope-shape + fallback specs), 128 react tests pass (incl. 3 new fallback specs), 87 core tests pass. Typecheck clean across worker-api, core, react, demo. Public type change: `RecommendationsResult` gained optional `fallback?: boolean` field (additive — existing consumers unaffected).
 
 ---
 
