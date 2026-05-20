@@ -5,6 +5,74 @@ All notable changes to QuestKit are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] — 2026-05-20
+
+Live click-through PDCA (the **real** `/frontend-test`) caught that the
+demo wasn't actually demonstrating live SDK updates. Three structural
+bugs + two demo-content gaps fixed in this release.
+
+### Fixed
+
+- **`packages/core/src/sse.ts` — unbound `fetch`** (THIRD instance of
+  the same pattern after polling.ts + client.ts in v0.1.0). The SSE
+  client stored the browser's native fetch as a class property and
+  called it as a method, throwing `TypeError: Illegal invocation`. The
+  error was swallowed by `handleStreamError` → 5 reconnect retries
+  all failed → polling fallback kicked in but **the SSE network
+  request never actually fired**. The demo's EventLog drawer stayed
+  silent on every interaction. Bound `fetch.bind(globalThis)`.
+- **`workers/api/src/services/ingest.ts` — no SSE broadcast on event
+  ingest.** `ingestEventCore` ran the rule engine and updated mission
+  progress in D1, then returned the response WITHOUT broadcasting the
+  resulting `mission.progress` / `mission.completed` updates to the
+  user's `SSE_HUB` Durable Object. Only the claim route broadcast.
+  Mirrored the claim's pattern with a new `tryBroadcastProgress`
+  helper. Live updates now reach every subscribed client.
+- **`apps/demo/src/routes/ecommerce.tsx` + `streaming.tsx` +
+  `daily.tsx` — `<MissionCard>`/`<MissionList>` never wired
+  `onClaim`.** The Claim button fired its analytics ping but never
+  POSTed to `/v1/missions/:id/claim`. Extracted a shared
+  `useMissionClaim` hook in `apps/demo/src/lib` and wired it into all
+  three routes; the hook calls `client.claimMission()` and shows the
+  resulting reward via the demo toast host.
+
+### Added
+
+- **`?user=<id>` query-param override** on the demo to mint a fresh
+  user per session (defaults to `demo_user_42`). The Playwright
+  golden-path spec + manual click-through testing need clean state to
+  exercise the claim flow without hitting idempotent replay.
+- **Migration 0003: Daily Visitor mission** (`daily.login` event,
+  count 1, daily window, badge reward). Previously the /daily route's
+  Check-in button fired the event but no mission matched, so the rule
+  engine returned an empty update list and the EventLog stayed silent.
+- **Migration 0004: Lucky Spinner + Scratch Master missions** for the
+  /minigames route (`qk.minigame.spin` / `qk.minigame.scratch` events,
+  lifetime windows, badge rewards). `minigames.tsx` now fires those
+  events from the `onSpin` / `onReveal` callbacks so each interaction
+  generates a visible `mission.progress` SDKUpdate in the EventLog
+  alongside the existing reward toast.
+- **`apps/demo/src/components/icons.tsx`** — shared SVG icons
+  (`CoinIcon`, `BadgeIcon`, `GiftIcon`) used by `Layout.tsx` (header
+  coin pill) and `DemoToastHost.tsx` (reward toasts). Replaces the
+  `🪙` `🏆` `🎁` emojis that rendered inconsistently across OS font
+  stacks.
+- **SonarCloud quality-gate job** in `.github/workflows/ci.yml` using
+  `SonarSource/sonarqube-scan-action@v5` (per plan amendment A22).
+  Gated on `secrets.SONAR_TOKEN` so workflows stay green for forks
+  without the token. README badge now points at the live SonarCloud
+  URL — image goes green on first successful scan.
+
+### Documentation
+
+- `instruction/work/test-report.md` updated with the click-through
+  PDCA log: which click triggered which fix, before/after console
+  state on all 4 routes.
+- 5 stale dependabot PRs closed (TypeScript 6, jest-environment-jsdom
+  30, and three GitHub Actions v6 bumps were created against pre-Phase-
+  2 base commits and failed CI for unrelated reasons). Dependabot will
+  recreate fresh PRs against current main on its next weekly scan.
+
 ## [0.1.1] — 2026-05-20
 
 Polish release driven by the post-launch `/frontend-test` PDCA sweep.
@@ -40,6 +108,7 @@ for the full PDCA log: 4 routes × console hygiene = 0 errors / 0
 warnings, 5/5 Playwright golden-path E2E green vs production, 441
 unit/integration tests across 6 packages.
 
+[0.1.2]: https://github.com/ilGentEAcutoO/QuestKit/releases/tag/v0.1.2
 [0.1.1]: https://github.com/ilGentEAcutoO/QuestKit/releases/tag/v0.1.1
 
 ## [0.1.0] — 2026-05-20
