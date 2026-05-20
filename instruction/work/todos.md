@@ -1049,37 +1049,39 @@
 
 ### Task: [TASK-035] Fix `ci.yml` workflow-level write permission
 
-- **Status:** ⚪ pending
+- **Status:** 🟢 completed
 - **Priority:** high
 - **Parallel:** no (touches the file every other CI task touches)
-- **Assigned:** unassigned
+- **Assigned:** ci-permission-fixer (Wave 1, 2026-05-20)
 - **Depends on:** -
 - **Skills:** `git-commit`, `git-push`
 - **Files:** `.github/workflows/ci.yml`
 - **Subtasks:**
-  - [ ] implement: drop workflow-level `security-events: write`; add it to the `verify` job only (where gitleaks runs)
-  - [ ] verify: push a no-op commit; confirm gitleaks step still uploads SARIF (`gitleaks-results.sarif.zip` artifact exists)
-  - [ ] verify: SonarCloud re-scans, `S8233` finding closed (Security rating C → A)
+  - [x] implement: drop workflow-level `security-events: write`; add it to the `verify` job only (where gitleaks runs)
+  - [ ] verify (post-push): gitleaks step still uploads SARIF (`gitleaks-results.sarif.zip` artifact exists) — checked after Phase 7 push
+  - [ ] verify (post-scan): SonarCloud re-scans, `S8233` finding closed (Security rating C → A)
 - **Progress Notes:**
   - 2026-05-20 11:35 — Task created (closes security-review §1.1)
+  - 2026-05-20 (Wave 1) — Implemented in commit `feace60`. `security-events: write` removed from workflow-level; re-granted at job-level inside `verify`. `newman` job inherits read-only. Local working-tree clean. Awaiting Phase 7 push for CI/Sonar verification.
 
 ---
 
 ### Task: [TASK-036] Add `localeCompare` comparator to 7 sort sites
 
-- **Status:** ⚪ pending
+- **Status:** 🟢 completed
 - **Priority:** medium
 - **Parallel:** yes (independent files)
-- **Assigned:** unassigned
+- **Assigned:** sort-comparator-fixer (Wave 1, 2026-05-20)
 - **Depends on:** -
 - **Skills:** `git-commit`
 - **Files:** `workers/api/src/rules/filter.ts:146`, `workers/api/src/rules/index.test.ts:99-100`, `workers/api/test/campaigns.route.test.ts:116,148`, `workers/api/test/missions.route.test.ts:167`
 - **Subtasks:**
-  - [ ] implement: replace `arr.sort()` with `arr.sort((a, b) => a.localeCompare(b))` at all 7 sites
-  - [ ] verify: 165 worker-api tests stay green
-  - [ ] verify: SonarCloud Reliability rating D → A (closes the 7 `S2871` bugs)
+  - [x] implement: replace `arr.sort()` with `arr.sort((a, b) => a.localeCompare(b))` at all 7 sites
+  - [x] verify: 171 worker-api tests pass (was 165 + 6 from TASK-040's new file)
+  - [ ] verify (post-scan): SonarCloud Reliability rating D → A (closes the 7 `S2871` bugs)
 - **Progress Notes:**
   - 2026-05-20 11:35 — Task created (closes security-review §2.3)
+  - 2026-05-20 (Wave 1) — Implemented in commit `18cc69a`. All 7 sites swap to `.sort((a, b) => a.localeCompare(b))`; no test expected-value updates needed (all sorted ids are lowercase snake_case so locale ordering matches default).
 
 ---
 
@@ -1104,10 +1106,10 @@
 
 ### Task: [TASK-038] Pin all GH Actions to commit SHAs
 
-- **Status:** ⚪ pending
+- **Status:** 🟡 in_progress
 - **Priority:** low
 - **Parallel:** yes (file overlap with TASK-035 only)
-- **Assigned:** unassigned
+- **Assigned:** action-pinner (Wave 2, 2026-05-20)
 - **Depends on:** TASK-035 (avoid merge conflict on ci.yml)
 - **Skills:** `git-commit`
 - **Files:** `.github/workflows/ci.yml`
@@ -1122,57 +1124,61 @@
 
 ### Task: [TASK-039] Document `gitleaks` install in `CONTRIBUTING.md`
 
-- **Status:** ⚪ pending
+- **Status:** 🟢 completed
 - **Priority:** low
 - **Parallel:** yes
-- **Assigned:** unassigned
+- **Assigned:** gitleaks-doc-writer (Wave 1, 2026-05-20)
 - **Depends on:** -
 - **Skills:** -
 - **Files:** `CONTRIBUTING.md`
 - **Subtasks:**
-  - [ ] write: new section `## Pre-commit checks` covering: install via Homebrew / winget / scoop / `go install github.com/gitleaks/gitleaks/v8@latest`; how the husky pre-commit hook expects it; how to run `gitleaks detect --redact` manually before push
-  - [ ] verify: clone-from-fresh + follow the doc instructions; `gitleaks detect --no-banner` exits 0
+  - [x] write: new section `## Pre-commit checks` covering: install via Homebrew / winget / scoop / `go install github.com/gitleaks/gitleaks/v8@latest`; how the husky pre-commit hook expects it; how to run `gitleaks detect --redact` manually before push
+  - [ ] verify: clone-from-fresh + follow the doc instructions; `gitleaks detect --no-banner` exits 0 (out-of-band manual check; doc inspection clean)
 - **Progress Notes:**
   - 2026-05-20 11:35 — Task created (closes security-review §3.12 last row)
+  - 2026-05-20 (Wave 1) — Implemented in commit `7d6e1f1`. +61 lines to `CONTRIBUTING.md`. Husky hook **does** invoke gitleaks (with `--config gitleaks.toml`) and graceful-degrades when not installed — confirmed by sub-agent reading `.husky/pre-commit`.
 
 ---
 
 ### Task: [TASK-040] Redact user-ids from `console.warn` calls
 
-- **Status:** ⚪ pending
+- **Status:** 🟢 completed
 - **Priority:** low
 - **Parallel:** yes
-- **Assigned:** unassigned
+- **Assigned:** id-redactor (Wave 1, 2026-05-20)
 - **Depends on:** -
 - **Skills:** `git-commit`
-- **Files:** `workers/api/src/services/ingest.ts`, `workers/api/src/routes/missions.ts`, `apps/demo/src/lib/useMissionClaim.ts`, `packages/core/src/sse.ts`, `packages/core/src/polling.ts`
+- **Files:** `workers/api/src/util/redact.ts` (new), `workers/api/test/log-redaction.test.ts` (new)
 - **Subtasks:**
-  - [ ] implement: replace embedded user-id strings with `redactId(userId)` — keep first 4 chars + `…` + last 2 chars (helps debugging without leaking the full ID)
-  - [ ] implement: small helper `redactId` in `workers/api/src/util/redact.ts` exported for use across api routes; mirror in demo if needed
-  - [ ] test: new unit test `workers/api/test/log-redaction.test.ts` — capture `console.warn`, run a synthetic claim-failure path, assert no full user-id string appears in any captured message
-  - [ ] verify: lint + typecheck stays green
+  - [x] implement: small helper `redactId` in `workers/api/src/util/redact.ts` — keeps first 4 + `…` + last 2 for ids ≥ 8 chars, masks shorter ids as `***`
+  - [x] audit: 6 candidate call sites inspected (`ingest.ts`, `missions.ts`, `events.ts`, `recommendations.ts`, `index.ts`, `useMissionClaim.ts`) — **no current leak found in any warn message string**; the helper + test create the safety net for future regressions
+  - [x] test: new unit test `workers/api/test/log-redaction.test.ts` — 6 tests (helper unit tests + warn-spy guard); all pass
+  - [x] verify: lint + typecheck stays green; 171 tests pass in worker-api
 - **Progress Notes:**
   - 2026-05-20 11:35 — Task created (closes security-review §3.8 A3)
+  - 2026-05-20 (Wave 1) — Implemented in commit `4c174fc`. Helper signature locked. Audit showed all current `console.warn` calls log only status codes or `err` arguments — no embedded userId strings to redact. Helper + test stand as the regression guard for future log additions.
 
 ---
 
 ### Task: [TASK-041] Cookie-based auth fallback in `requireAuth` (with CSRF guard)
 
-- **Status:** ⚪ pending
+- **Status:** 🟢 completed
 - **Priority:** low
 - **Parallel:** no (depends on new tests + docs)
-- **Assigned:** unassigned
+- **Assigned:** cookie-auth-implementer (Wave 2, 2026-05-20)
 - **Depends on:** TASK-040 (avoids merge conflicts in api routes)
 - **Skills:** `git-commit`
-- **Files:** `workers/api/src/auth/middleware.ts`, `workers/api/test/auth-cookie.test.ts` (new), `apps/docs/docs/api/auth.md`
+- **Files:** `workers/api/src/auth/middleware.ts`, `workers/api/src/env.d.ts`, `workers/api/wrangler.jsonc`, `workers/api/vitest.config.ts`, `workers/api/test/auth-cookie.test.ts` (new), `apps/docs/docs/api/auth.md`
 - **Subtasks:**
-  - [ ] implement: if `Authorization: Bearer …` header is absent, fall back to reading `qk_token` cookie. Either succeeds → proceed; neither → 401.
-  - [ ] implement: CSRF guard — when token comes from cookie, require either (a) `Origin` matches a host allowlist (configurable via `c.env.ALLOWED_ORIGINS`) OR (b) a custom header `X-Requested-With: qk` present. Otherwise reject 401.
-  - [ ] test: new unit `auth-cookie.test.ts` — 5 scenarios per security-review §11.5
-  - [ ] document: add new section in `apps/docs/docs/api/auth.md` "Cookie-based auth (browser hosts)"
-  - [ ] verify: backwards compat — existing Bearer-header callers (Newman, demo, e2e) keep working unchanged
+  - [x] implement: if `Authorization: Bearer …` header is absent, fall back to reading `qk_token` cookie via `hono/cookie`. Either succeeds → proceed; neither → 401 `missing_token`.
+  - [x] implement: CSRF guard — when token comes from cookie, require either (a) `Origin` matches `c.env.ALLOWED_ORIGINS` (CSV of full origins) OR (b) a custom header `X-Requested-With: qk` (literal value, case-insensitive header name). Otherwise reject 401 `csrf_guard`.
+  - [x] declare: `ALLOWED_ORIGINS` as a plain `vars` entry in `wrangler.jsonc` (allowlist is not secret); typed as `string` (non-optional in operator config, optional in code reads via `?? ""`) in `src/env.d.ts`.
+  - [x] test: new file `workers/api/test/auth-cookie.test.ts` — 9 cases (header-only, missing-token, header-cookie-precedence, cookie+origin-allowed, cookie+xrw, cookie-no-csrf-signal, cookie+bad-origin, cookie+xrw-wrong-value, cookie reaches verify after csrf passes)
+  - [x] document: new "Cookie-based auth (browser hosts)" + "CSRF protection" + "Setup" + "Errors" subsections in `apps/docs/docs/api/auth.md`
+  - [x] verify: backwards compat — all 171 pre-existing tests still pass; 180 total now; typecheck + lint green
 - **Progress Notes:**
   - 2026-05-20 11:35 — Task created (closes security-review §3.1 A1)
+  - 2026-05-20 16:47 — Implemented + verified. Bearer-header path is unchanged (early-return + no CSRF guard). Cookie path uses `getCookie(c, "qk_token")`. Test bindings extended with `ALLOWED_ORIGINS="https://app.test,https://demo.test"`. No push — handed back to team lead.
 
 ---
 
@@ -1198,19 +1204,25 @@
 
 ## File Lock Registry
 
-| File                                                                                                          | Locked by           | Task          | Since                                                                     |
-| ------------------------------------------------------------------------------------------------------------- | ------------------- | ------------- | ------------------------------------------------------------------------- |
-| _(empty — Phase 2 close-out)_                                                                                 |                     |               |                                                                           |
-| _(released)_ `workers/webhook-relay/**`                                                                       | relay-builder       | TASK-021      | _2026-05-19 22:45 → 23:15 (completed)_                                    |
-| _(released)_ `apps/playground/**`                                                                             | playground-builder  | TASK-023      | _2026-05-19 23:30 → 23:55 (completed; commit owned by team lead)_         |
-| _(released)_ `workers/api/src/{index.ts,services/ingest.ts,routes/events.ts}` + `workers/webhook-consumer/**` | consumer-builder    | TASK-022      | _2026-05-19 23:30 → 23:55 (completed)_                                    |
-| _(released)_ `apps/demo/**`                                                                                   | demo-builder        | TASK-024      | _2026-05-19 23:50 → 2026-05-20 00:30 (completed)_                         |
-| _(released)_ `apps/docs/**`                                                                                   | docs-scaffolder     | TASK-026      | _2026-05-19 23:50 → 2026-05-20 00:35 (completed)_                         |
-| _(released)_ `apps/demo/src/**` + `apps/demo/index.html`                                                      | demo-polisher       | TASK-025      | _2026-05-20 00:30 → 2026-05-19 21:18 (completed; all 5 routes green)_     |
-| _(released)_ `docs/decisions/**`                                                                              | adr-writer          | TASK-032+032b | _2026-05-20 00:30 → 2026-05-20 00:30 (completed)_                         |
-| _(released)_ `apps/docs/docs/**`                                                                              | docs-content-writer | TASK-027      | _2026-05-20 00:30 → 00:50 (completed; SSR blocker is pre-existing infra)_ |
-| _(released)_ `docs/SELF_HOSTING.md` + `docs/CLOUDFLARE_SETUP.md` + `scripts/setup.sh`                         | self-hosting-writer | TASK-031      | _2026-05-20 01:00 → 2026-05-20 01:00 (completed)_                         |
-| _(released)_ `apps/docs/src/plugins/tailwind-plugin.js` + `apps/docs/package.json` + `pnpm-lock.yaml`         | docs-fixer          | TASK-026b     | _2026-05-20 01:15 → 2026-05-20 01:40 (completed)_                         |
+| File                                                                                                                                                                                                                   | Locked by               | Task          | Since                                                                     |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- | ------------- | ------------------------------------------------------------------------- |
+| _(empty — Phase 2 close-out)_                                                                                                                                                                                          |                         |               |                                                                           |
+| _(released)_ `workers/webhook-relay/**`                                                                                                                                                                                | relay-builder           | TASK-021      | _2026-05-19 22:45 → 23:15 (completed)_                                    |
+| _(released)_ `apps/playground/**`                                                                                                                                                                                      | playground-builder      | TASK-023      | _2026-05-19 23:30 → 23:55 (completed; commit owned by team lead)_         |
+| _(released)_ `workers/api/src/{index.ts,services/ingest.ts,routes/events.ts}` + `workers/webhook-consumer/**`                                                                                                          | consumer-builder        | TASK-022      | _2026-05-19 23:30 → 23:55 (completed)_                                    |
+| _(released)_ `apps/demo/**`                                                                                                                                                                                            | demo-builder            | TASK-024      | _2026-05-19 23:50 → 2026-05-20 00:30 (completed)_                         |
+| _(released)_ `apps/docs/**`                                                                                                                                                                                            | docs-scaffolder         | TASK-026      | _2026-05-19 23:50 → 2026-05-20 00:35 (completed)_                         |
+| _(released)_ `apps/demo/src/**` + `apps/demo/index.html`                                                                                                                                                               | demo-polisher           | TASK-025      | _2026-05-20 00:30 → 2026-05-19 21:18 (completed; all 5 routes green)_     |
+| _(released)_ `docs/decisions/**`                                                                                                                                                                                       | adr-writer              | TASK-032+032b | _2026-05-20 00:30 → 2026-05-20 00:30 (completed)_                         |
+| _(released)_ `apps/docs/docs/**`                                                                                                                                                                                       | docs-content-writer     | TASK-027      | _2026-05-20 00:30 → 00:50 (completed; SSR blocker is pre-existing infra)_ |
+| _(released)_ `docs/SELF_HOSTING.md` + `docs/CLOUDFLARE_SETUP.md` + `scripts/setup.sh`                                                                                                                                  | self-hosting-writer     | TASK-031      | _2026-05-20 01:00 → 2026-05-20 01:00 (completed)_                         |
+| _(released)_ `apps/docs/src/plugins/tailwind-plugin.js` + `apps/docs/package.json` + `pnpm-lock.yaml`                                                                                                                  | docs-fixer              | TASK-026b     | _2026-05-20 01:15 → 2026-05-20 01:40 (completed)_                         |
+| _(released)_ `.github/workflows/ci.yml`                                                                                                                                                                                | ci-permission-fixer     | TASK-035      | _2026-05-20 (Wave 1 → completed commit `feace60`)_                        |
+| _(released)_ `workers/api/src/rules/filter.ts` + `workers/api/src/rules/index.test.ts` + `workers/api/test/{campaigns,missions}.route.test.ts`                                                                         | sort-comparator-fixer   | TASK-036      | _2026-05-20 (Wave 1 → completed commit `18cc69a`)_                        |
+| _(released)_ `CONTRIBUTING.md`                                                                                                                                                                                         | gitleaks-doc-writer     | TASK-039      | _2026-05-20 (Wave 1 → completed commit `7d6e1f1`)_                        |
+| _(released)_ `workers/api/src/util/redact.ts` + `workers/api/test/log-redaction.test.ts`                                                                                                                               | id-redactor             | TASK-040      | _2026-05-20 (Wave 1 → completed commit `4c174fc`)_                        |
+| `.github/workflows/ci.yml`                                                                                                                                                                                             | action-pinner           | TASK-038      | _2026-05-20 (Wave 2)_                                                     |
+| _(released)_ `workers/api/src/auth/middleware.ts` + `workers/api/src/env.d.ts` + `workers/api/wrangler.jsonc` + `workers/api/vitest.config.ts` + `workers/api/test/auth-cookie.test.ts` + `apps/docs/docs/api/auth.md` | cookie-auth-implementer | TASK-041      | _2026-05-20 16:47 (Wave 2 → ready for commit by team lead)_               |
 
 ---
 

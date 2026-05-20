@@ -25,6 +25,18 @@ declare global {
 
     /** App-level shared secret required by /v1/auth/token to mint user tokens. Set via `wrangler secret put APP_SECRET`. */
     APP_SECRET: string;
+
+    /**
+     * Comma-separated list of full origins allowed to authenticate via the
+     * `qk_token` cookie path in `requireAuth` (e.g.
+     * `"https://demo.questkit.jairukchan.com,https://app.example.com"`).
+     *
+     * Optional: when unset/empty, the cookie-path CSRF guard requires the
+     * custom `X-Requested-With: qk` header instead. The Bearer-header path
+     * is unaffected. Declared as a `vars` entry in `wrangler.jsonc` (not a
+     * secret — the allowlist is not sensitive).
+     */
+    ALLOWED_ORIGINS?: string;
   }
 
   // The pool-workers `cloudflare:test` module types `env` as `Cloudflare.Env`.
@@ -36,6 +48,7 @@ declare global {
       JWT_SECRET: string;
       WEBHOOK_HMAC_SECRET: string;
       APP_SECRET: string;
+      ALLOWED_ORIGINS?: string;
     }
   }
 }

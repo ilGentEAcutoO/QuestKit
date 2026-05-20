@@ -45,6 +45,9 @@ const TEST_JWT_SECRET =
 const TEST_APP_SECRET = "test_app_secret_do_not_use_in_prod_xxxxxxxxxxxxxxx";
 const TEST_WEBHOOK_HMAC_SECRET =
   "test_webhook_hmac_do_not_use_in_prod_yyyyyyyyyyyyyyyyyyyyyyyyyyy";
+// ALLOWED_ORIGINS for the cookie-path CSRF guard (TASK-041). The literal
+// test origin used by `auth-cookie.test.ts` must match an entry here.
+const TEST_ALLOWED_ORIGINS = "https://app.test,https://demo.test";
 
 export default defineConfig({
   plugins: [
@@ -63,6 +66,7 @@ export default defineConfig({
           JWT_SECRET: TEST_JWT_SECRET,
           APP_SECRET: TEST_APP_SECRET,
           WEBHOOK_HMAC_SECRET: TEST_WEBHOOK_HMAC_SECRET,
+          ALLOWED_ORIGINS: TEST_ALLOWED_ORIGINS,
           // Parsed migrations as a serialisable JSON string — `setup.ts`
           // reads, parses, and feeds the array to `applyD1Migrations`.
           // (We don't use `provide`/`inject` because the worker pool runs

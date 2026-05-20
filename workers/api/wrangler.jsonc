@@ -75,5 +75,15 @@
   // Workers AI — recommendations via @cf/meta/llama-3.1-8b-instruct-fast
   // (the base llama-3.1-8b-instruct model deprecates 2026-05-30 per plan
   // amendment A8). No resource to create; binding is the API surface.
-  "ai": { "binding": "AI" }
+  "ai": { "binding": "AI" },
+
+  // Plain (non-secret) vars. `ALLOWED_ORIGINS` is a comma-separated list of
+  // full origins allowed to use the cookie-based auth path in `requireAuth`
+  // (see apps/docs/docs/api/auth.md → "Cookie-based auth"). Empty placeholder
+  // here — operators override per-env via `wrangler.dev.jsonc` (local) or
+  // `wrangler.toml`/CI vars (staging/production). Header-Bearer callers
+  // (SDK, demo, Newman) are unaffected by this value.
+  "vars": {
+    "ALLOWED_ORIGINS": ""
+  }
 }
