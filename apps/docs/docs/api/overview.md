@@ -66,20 +66,20 @@ A `db-hit` value means the partial-unique index caught a replay the KV layer mis
 
 Errors come back as `{ "error": "<code>", "message"?: "..." }` with a meaningful HTTP status.
 
-| HTTP | `error` code            | Meaning                                              |
-| ---- | ----------------------- | ---------------------------------------------------- |
-| 400  | `validation_error`      | Body shape failed validation.                        |
-| 400  | `invalid_event`         | `POST /v1/events` body failed validation.            |
-| 401  | `invalid_credentials`   | `POST /v1/auth/token` rejected the secret.           |
-| 401  | `unauthorized`          | Missing or invalid JWT.                              |
-| 403  | `user_mismatch`         | Event body's `userId` doesn't match the JWT's `sub`. |
-| 404  | `mission_not_found`     | The mission doesn't exist.                           |
-| 404  | `balance_not_found`     | No balance row for `(userId, currency)`.             |
-| 404  | `campaign_not_found`    | The campaign doesn't exist.                          |
-| 409  | `claim_not_ready`       | Mission isn't `completed` yet (or no progress row).  |
-| 429  | `rate_limited`          | Sliding-window cap hit. See `Retry-After`.           |
-| 502  | `ai_response_malformed` | AI returned a non-JSON / unparseable payload.        |
-| 503  | `ai_unavailable`        | Workers AI binding failed (timeout, outage).         |
+| HTTP | `error` code          | Meaning                                              |
+| ---- | --------------------- | ---------------------------------------------------- |
+| 400  | `validation_error`    | Body shape failed validation.                        |
+| 400  | `invalid_event`       | `POST /v1/events` body failed validation.            |
+| 401  | `invalid_credentials` | `POST /v1/auth/token` rejected the secret.           |
+| 401  | `unauthorized`        | Missing or invalid JWT.                              |
+| 403  | `user_mismatch`       | Event body's `userId` doesn't match the JWT's `sub`. |
+| 404  | `mission_not_found`   | The mission doesn't exist.                           |
+| 404  | `balance_not_found`   | No balance row for `(userId, currency)`.             |
+| 404  | `campaign_not_found`  | The campaign doesn't exist.                          |
+| 409  | `claim_not_ready`     | Mission isn't `completed` yet (or no progress row).  |
+| 429  | `rate_limited`        | Sliding-window cap hit. See `Retry-After`.           |
+
+> Note: AI-recommendation failures used to surface as `502 ai_response_malformed` / `503 ai_unavailable`. Since v0.1.4 those failure modes are absorbed by the route: `GET /v1/recommendations` returns `200 { fallback: true, ... }` instead. See [`/v1/recommendations`](./recommendations.md#graceful-fallback--200-ok-fallback-true).
 
 ## CORS
 

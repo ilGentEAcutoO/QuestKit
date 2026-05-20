@@ -12,18 +12,27 @@
  *      yields an empty list → we short-circuit and return an empty result
  *      WITHOUT calling the AI (saves an inference; matches the brief).
  *   4. Delegate to `services/ai.ts#recommendMissions` which handles caching,
- *      prompt construction, model invocation, response validation, and
- *      hallucinated-ID filtering.
- *   5. Map errors:
- *      - AiResponseError      → 502 ai_response_malformed
- *      - other env.AI failures → 503 ai_unavailable
+ *      prompt construction, model invocation, response validation,
+ *      hallucinated-ID filtering, AND graceful fallback on malformed AI
+ *      responses (Phase 8 / v0.1.4 TASK-002). The service returns
+ *      `{ fallback: true, ... }` instead of throwing — surfaced verbatim
+ *      below with HTTP 200.
+ *   5. Catch any `env.AI` binding outage (timeout, missing model, network)
+ *      and translate to the same fallback payload — the UI should NEVER see
+ *      a red 502/503 from this route. Status code remains 200.
  *
  * Response shape (locked):
- *   { missionIds: string[], reason: string, cached: boolean, count: number }
+ *   { missionIds: string[], reason: string, cached: boolean, count: number,
+ *     fallback?: boolean }
  *
  *   `count` is the length of `missionIds` after hallucination filtering —
  *   gives the UI a single field to test for `count === 0` without scanning
  *   the array.
+ *
+ *   `fallback` is present and `true` ONLY when the AI is unavailable; the
+ *   UI uses it to render a tasteful empty-state instead of a real
+ *   recommendations panel. Successful responses omit the field entirely
+ *   so existing UI code that ignores `fallback` continues to work.
  *
  * ## Why "active" missions = active ∪ completed?
  *
@@ -40,7 +49,7 @@ import {
   listProgressForUser,
   recentEventsForUser,
 } from "../db/schema";
-import { AiResponseError, recommendMissions } from "../services/ai";
+import { FALLBACK_REASON, recommendMissions } from "../services/ai";
 
 interface RecommendationsVars {
   userId: string;
@@ -59,6 +68,11 @@ interface RecommendationsResponse {
   reason: string;
   cached: boolean;
   count: number;
+  /**
+   * Present and `true` only when the AI was unavailable. Omitted on success.
+   * The UI checks for this to render a graceful empty-state.
+   */
+  fallback?: boolean;
 }
 
 /**
@@ -113,8 +127,11 @@ recommendations.get("/", async (c) => {
     return c.json(response, 200);
   }
 
-  // Delegate to the service. AiResponseError → 502; anything else from
-  // env.AI (binding outage, timeout, etc.) → 503.
+  // Delegate to the service. The service handles malformed AI responses
+  // internally (returns `{ fallback: true, missionIds: [], ... }` instead
+  // of throwing). We only need to catch a binding outage (env.AI throws),
+  // and in that case we ALSO return a 200 fallback so the UI never sees
+  // a red error from this route.
   try {
     const result = await recommendMissions(c.env, userId, events, missions);
     const response: RecommendationsResponse = {
@@ -122,15 +139,19 @@ recommendations.get("/", async (c) => {
       reason: result.reason,
       cached: result.cached,
       count: result.missionIds.length,
+      ...(result.fallback === true ? { fallback: true } : {}),
     };
     return c.json(response, 200);
   } catch (err) {
-    if (err instanceof AiResponseError) {
-      console.warn("[recommendations] ai response malformed", err);
-      return c.json({ error: "ai_response_malformed" }, 502);
-    }
-    console.warn("[recommendations] ai binding failure", err);
-    return c.json({ error: "ai_unavailable" }, 503);
+    console.warn("[recommendations] ai binding failure, falling back", err);
+    const response: RecommendationsResponse = {
+      missionIds: [],
+      reason: FALLBACK_REASON,
+      cached: false,
+      count: 0,
+      fallback: true,
+    };
+    return c.json(response, 200);
   }
 });
 

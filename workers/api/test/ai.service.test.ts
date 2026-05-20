@@ -16,15 +16,19 @@
  *   1. Cache HIT — AI binding NOT called, returns { ...cached, cached: true }.
  *   2. Cache MISS — AI binding called with the expected `messages` shape and
  *      result is returned with cached:false; KV put fired with the 1h TTL.
- *   3. Malformed AI response (text without JSON) — throws.
+ *   3. Malformed AI response (text without JSON) — returns fallback (does NOT
+ *      throw, does NOT pollute the cache). Phase 8 / v0.1.4 TASK-002.
  *   4. Hallucinated mission ID — IDs not in `activeMissions` are filtered out.
  *   5. System prompt is sent verbatim (the brief locked the exact wording).
  *   6. Security — event payload VALUES are NEVER serialised into the user
  *      message (only name + count + missionId + criteria.eventName / count).
+ *   7. Envelope-shape acceptance — `@cf/meta/llama-3.1-8b-instruct-fast` may
+ *      return the payload under `{response: string}`, `{result: object}`, or
+ *      as a raw object. All three must parse to the same result.
  */
 import type { Event, Mission } from "@questkit/types";
 import { describe, expect, it, vi } from "vitest";
-import { AiResponseError, recommendMissions } from "../src/services/ai";
+import { recommendMissions } from "../src/services/ai";
 
 // -----------------------------------------------------------------------------
 // Fake bindings — we don't use cloudflare:test here.
@@ -270,41 +274,48 @@ describe("recommendMissions — security (prompt-injection guard)", () => {
   });
 });
 
-describe("recommendMissions — AI response validation", () => {
-  it("throws AiResponseError when the AI returns text without parseable JSON", async () => {
-    const { kv } = makeKvStub();
+describe("recommendMissions — AI response validation (fallback path, no throw)", () => {
+  it("returns fallback when the AI returns text without parseable JSON", async () => {
+    const { kv, store } = makeKvStub();
     const { ai } = makeAiStub(async () => ({
       response: "I am a model and I cannot follow JSON instructions today.",
     }));
     const env = makeEnv(ai, kv);
 
-    await expect(
-      recommendMissions(env, "u1", [], [missionA]),
-    ).rejects.toBeInstanceOf(AiResponseError);
+    const result = await recommendMissions(env, "u1", [], [missionA]);
+
+    expect(result.fallback).toBe(true);
+    expect(result.missionIds).toEqual([]);
+    expect(result.cached).toBe(false);
+    expect(typeof result.reason).toBe("string");
+    // Fallback must NOT pollute the KV cache — next call should retry the AI.
+    expect(store.get("rec:u1")).toBeUndefined();
   });
 
-  it("throws AiResponseError when missionIds is not a string array", async () => {
-    const { kv } = makeKvStub();
+  it("returns fallback when missionIds is not a string array", async () => {
+    const { kv, store } = makeKvStub();
     const { ai } = makeAiStub(async () => ({
       response: JSON.stringify({ missionIds: "mis_a", reason: "hi" }),
     }));
     const env = makeEnv(ai, kv);
 
-    await expect(
-      recommendMissions(env, "u1", [], [missionA]),
-    ).rejects.toBeInstanceOf(AiResponseError);
+    const result = await recommendMissions(env, "u1", [], [missionA]);
+    expect(result.fallback).toBe(true);
+    expect(result.missionIds).toEqual([]);
+    expect(store.get("rec:u1")).toBeUndefined();
   });
 
-  it("throws AiResponseError when reason is missing", async () => {
-    const { kv } = makeKvStub();
+  it("returns fallback when reason is missing", async () => {
+    const { kv, store } = makeKvStub();
     const { ai } = makeAiStub(async () => ({
       response: JSON.stringify({ missionIds: ["mis_a"] }),
     }));
     const env = makeEnv(ai, kv);
 
-    await expect(
-      recommendMissions(env, "u1", [], [missionA]),
-    ).rejects.toBeInstanceOf(AiResponseError);
+    const result = await recommendMissions(env, "u1", [], [missionA]);
+    expect(result.fallback).toBe(true);
+    expect(result.missionIds).toEqual([]);
+    expect(store.get("rec:u1")).toBeUndefined();
   });
 
   it("drops hallucinated mission IDs that are not in activeMissions", async () => {
@@ -326,5 +337,72 @@ describe("recommendMissions — AI response validation", () => {
     expect(result.missionIds).toEqual(["mis_a", "mis_b"]);
     expect(result.reason).toBe("Try these.");
     expect(result.cached).toBe(false);
+    expect(result.fallback).toBeFalsy();
+  });
+});
+
+// -----------------------------------------------------------------------------
+// Envelope-shape acceptance (Phase 8 / v0.1.4 TASK-002).
+// `@cf/meta/llama-3.1-8b-instruct-fast` can return the JSON payload under any
+// of these envelopes; the parser must accept all three before falling back.
+// -----------------------------------------------------------------------------
+
+describe("recommendMissions — envelope shape acceptance", () => {
+  const aiBody = { missionIds: ["mis_a"], reason: "Welcome back." };
+
+  it("shape 1: {response: string} — parses the .response JSON string", async () => {
+    const { kv, store } = makeKvStub();
+    const { ai } = makeAiStub(async () => ({
+      response: JSON.stringify(aiBody),
+    }));
+    const env = makeEnv(ai, kv);
+
+    const result = await recommendMissions(env, "u1", [], [missionA]);
+    expect(result.fallback).toBeFalsy();
+    expect(result.missionIds).toEqual(["mis_a"]);
+    expect(result.reason).toBe("Welcome back.");
+    // Happy-path result MUST be cached.
+    expect(store.get("rec:u1")).toBeDefined();
+  });
+
+  it("shape 2: {result: object} — uses .result as the parsed payload", async () => {
+    const { kv, store } = makeKvStub();
+    const { ai } = makeAiStub(async () => ({
+      result: aiBody,
+    }));
+    const env = makeEnv(ai, kv);
+
+    const result = await recommendMissions(env, "u1", [], [missionA]);
+    expect(result.fallback).toBeFalsy();
+    expect(result.missionIds).toEqual(["mis_a"]);
+    expect(result.reason).toBe("Welcome back.");
+    expect(store.get("rec:u1")).toBeDefined();
+  });
+
+  it("shape 3: raw object — the AI returns the payload at the top level", async () => {
+    const { kv, store } = makeKvStub();
+    const { ai } = makeAiStub(async () => aiBody);
+    const env = makeEnv(ai, kv);
+
+    const result = await recommendMissions(env, "u1", [], [missionA]);
+    expect(result.fallback).toBeFalsy();
+    expect(result.missionIds).toEqual(["mis_a"]);
+    expect(result.reason).toBe("Welcome back.");
+    expect(store.get("rec:u1")).toBeDefined();
+  });
+
+  it("shape 2 with .response field that is NOT a string falls through to .result", async () => {
+    // Defensive: some Workers AI variants set .response: null and put the data
+    // under .result. The normalizer must not get stuck on a non-string .response.
+    const { kv } = makeKvStub();
+    const { ai } = makeAiStub(async () => ({
+      response: null,
+      result: aiBody,
+    }));
+    const env = makeEnv(ai, kv);
+
+    const result = await recommendMissions(env, "u1", [], [missionA]);
+    expect(result.fallback).toBeFalsy();
+    expect(result.missionIds).toEqual(["mis_a"]);
   });
 });

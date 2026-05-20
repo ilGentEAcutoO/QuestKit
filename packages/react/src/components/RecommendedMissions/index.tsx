@@ -6,10 +6,15 @@
  * is surfaced as a subtle caption above the cards.
  *
  * States:
- *   - loading:  role="status" + visible skeleton
- *   - error:    role="alert" with retry
- *   - empty:    neutral copy when missionIds.length === 0
- *   - loaded:   reason caption + up to 3 MissionCards
+ *   - loading:   role="status" + visible skeleton
+ *   - error:     role="alert" with retry
+ *   - fallback:  role="status" with tasteful empty-state copy ("AI picks
+ *                unavailable right now"). Triggered when the server
+ *                indicates `fallback: true` — the AI was unavailable or
+ *                returned a malformed response. Phase 8 / v0.1.4 TASK-002.
+ *   - empty:     neutral copy when missionIds.length === 0 (and fallback
+ *                is NOT set — that's a happy-path "nothing for you yet").
+ *   - loaded:    reason caption + up to 3 MissionCards
  *
  * When the response has `cached: true`, we surface a tiny "Refreshes
  * hourly" hint so the user knows the recommendations aren't real-time.
@@ -140,6 +145,39 @@ export function RecommendedMissions({
 
   const data = state.data;
   const ids = data?.missionIds ?? [];
+
+  // Phase 8 / v0.1.4 TASK-002 — graceful fallback when the AI is unavailable.
+  // We branch on `fallback` BEFORE the regular empty-state because a fallback
+  // response may also have `missionIds: []` and we want different copy. We
+  // also branch BEFORE the loaded branch — even if the server happens to
+  // include ids alongside `fallback: true`, those ids are not trustworthy and
+  // we suppress them. The text is deliberately product-flavoured (no error
+  // codes, no model names) so it reads like an ordinary empty state.
+  if (data?.fallback === true) {
+    return (
+      <section
+        className={[rootClass, "qk-recommendations-fallback"]
+          .filter(Boolean)
+          .join(" ")}
+        role="status"
+        aria-label="AI picks unavailable"
+        style={{ ...rootStyle, opacity: 0.8 }}
+      >
+        <p className="qk-recommendations-fallback-text">
+          AI picks unavailable right now.
+        </p>
+        <p
+          className="qk-recommendations-fallback-hint text-xs"
+          style={{
+            opacity: 0.6,
+            margin: 0,
+          }}
+        >
+          Try again in a moment.
+        </p>
+      </section>
+    );
+  }
 
   if (ids.length === 0) {
     return (
