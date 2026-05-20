@@ -143,7 +143,7 @@ function canonicalJson(value: unknown): string {
   }
   // Plain object — sort keys for canonical ordering.
   const obj = value as Record<string, unknown>;
-  const keys = Object.keys(obj).sort();
+  const keys = Object.keys(obj).sort((a, b) => a.localeCompare(b));
   const inner = keys
     .map((k) => `${JSON.stringify(k)}:${canonicalJson(obj[k])}`)
     .join(",");

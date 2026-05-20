@@ -164,7 +164,9 @@ describe("get /v1/missions", () => {
     // 6 from migration 0002 (3 ecom + 3 streaming) + 3 added later:
     // mis_daily_visitor (0003), mis_lucky_spinner + mis_scratch_master (0004).
     expect(body.missions.length).toBe(9);
-    const ids = body.missions.map((m) => m.id).sort();
+    const ids = body.missions
+      .map((m) => m.id)
+      .sort((a, b) => a.localeCompare(b));
     expect(ids).toEqual([
       "mis_daily_visitor",
       "mis_ecom_daily_purchase_3",

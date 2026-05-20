@@ -113,7 +113,9 @@ describe("get /v1/campaigns", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as CampaignListResp;
     expect(body.campaigns.length).toBe(2);
-    const ids = body.campaigns.map((c) => c.id).sort();
+    const ids = body.campaigns
+      .map((c) => c.id)
+      .sort((a, b) => a.localeCompare(b));
     expect(ids).toEqual(["camp_ecom_2026q2", "camp_stream_2026q2"]);
 
     // Each campaign carries its mission ids. The ecom campaign has the 3
@@ -145,14 +147,16 @@ describe("get /v1/campaigns/:id", () => {
     expect(body.campaign.id).toBe("camp_ecom_2026q2");
     expect(body.campaign.title).toBe("E-commerce Spring 2026");
     expect(body.campaign.missionIds.length).toBe(6);
-    expect(body.campaign.missionIds.sort()).toEqual([
-      "mis_daily_visitor",
-      "mis_ecom_daily_purchase_3",
-      "mis_ecom_electronics_50",
-      "mis_ecom_variety_week",
-      "mis_lucky_spinner",
-      "mis_scratch_master",
-    ]);
+    expect(body.campaign.missionIds.sort((a, b) => a.localeCompare(b))).toEqual(
+      [
+        "mis_daily_visitor",
+        "mis_ecom_daily_purchase_3",
+        "mis_ecom_electronics_50",
+        "mis_ecom_variety_week",
+        "mis_lucky_spinner",
+        "mis_scratch_master",
+      ],
+    );
     // Without ?include=missions, the missions[] is undefined.
     expect(body.missions).toBeUndefined();
   });
@@ -167,7 +171,9 @@ describe("get /v1/campaigns/:id", () => {
     const body = (await res.json()) as CampaignDetailResp;
     expect(body.missions).toBeDefined();
     expect(body.missions?.length).toBe(6);
-    const ids = body.missions?.map((m) => m.id).sort();
+    const ids = body.missions
+      ?.map((m) => m.id)
+      .sort((a, b) => a.localeCompare(b));
     expect(ids).toEqual([
       "mis_daily_visitor",
       "mis_ecom_daily_purchase_3",

@@ -96,8 +96,10 @@ describe("evaluateEvent — orchestrator", () => {
     });
     const updates = await evaluateEvent(env.DB, event, [m1, m2, m3, m4, m5]);
 
-    const ids = updates.map((u) => u.missionId).sort();
-    expect(ids).toEqual([m1.id, m2.id].sort());
+    const ids = updates
+      .map((u) => u.missionId)
+      .sort((a, b) => a.localeCompare(b));
+    expect(ids).toEqual([m1.id, m2.id].sort((a, b) => a.localeCompare(b)));
 
     // M2 (count=1) should be completed.
     const u2 = updates.find((u) => u.missionId === m2.id);
