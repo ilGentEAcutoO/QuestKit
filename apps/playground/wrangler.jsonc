@@ -14,9 +14,14 @@
   "assets": {
     "directory": "./public",
     "not_found_handling": "404-page"
-  }
+  },
 
-  // Custom-domain wiring (play.questkit.jairukchan.com) is intentionally
-  // deferred to TASK-030 (Phase 6). Until then `wrangler dev` covers local
-  // verification and `wrangler deploy --dry-run` keeps the config honest.
+  // Custom domain. CF auto-provisions DNS + SSL cert on first deploy
+  // against a zone the account owns (jairukchan.com on SORNKan Co., Ltd.).
+  "routes": [
+    {
+      "pattern": "play.questkit.jairukchan.com",
+      "custom_domain": true
+    }
+  ]
 }

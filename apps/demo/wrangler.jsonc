@@ -17,14 +17,21 @@
     "not_found_handling": "single-page-application",
     "binding": "ASSETS_BINDING",
     "run_worker_first": ["/api/*"]
-  }
+  },
+
+  // Custom domain (apex). CF auto-provisions DNS + SSL cert when wrangler
+  // deploys with custom_domain: true against a zone the account owns.
+  // Zone is jairukchan.com on the SORNKan Co., Ltd. CF account.
+  "routes": [
+    {
+      "pattern": "questkit.jairukchan.com",
+      "custom_domain": true
+    }
+  ]
 
   // APP_SECRET is intentionally NOT declared here — it is set via
   // `wrangler secret put APP_SECRET --name questkit-worker-demo` at deploy
   // time and reaches the worker via `c.env.APP_SECRET`. The value must
   // match the APP_SECRET on `questkit-worker-api` so the upstream
   // /v1/auth/token call succeeds.
-  //
-  // Custom-domain wiring (apex / demo.questkit.jairukchan.com) is
-  // deferred to TASK-030 (Phase 6).
 }
