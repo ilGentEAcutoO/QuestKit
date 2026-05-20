@@ -10,7 +10,7 @@ minimumReleaseAge: 1440
 # Single source of truth for cross-workspace versions. Reference with `"typescript": "catalog:"`.
 catalog:
   # Language
-  typescript: 5.8.3
+  typescript: 6.0.3
 
   # React
   react: 18.3.1
