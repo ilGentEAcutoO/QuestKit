@@ -43,5 +43,12 @@
   "lint-staged": {
     "*.{ts,tsx,js,jsx,json,md,css,yml,yaml}": "prettier --write",
     "*.{ts,tsx,js,jsx}": "eslint --fix"
+  },
+  "pnpm": {
+    "overrides": {
+      "serialize-javascript": "^7.0.5",
+      "http-proxy-agent": "^7.0.0",
+      "ws@>=8.0.0 <8.20.1": "^8.20.1"
+    }
   }
 }
