@@ -71,6 +71,39 @@ jobs:
         run: pnpm audit --prod --audit-level=high
         continue-on-error: true
 
+  # SonarQube/SonarCloud quality gate (per plan amendment A22). Gated on
+  # secrets.SONAR_TOKEN being set so the workflow stays green for forks/PRs
+  # that don't have access to the secret. To enable: create the SonarCloud
+  # org + import this repo (SonarCloud → My Account → Add → GitHub), then
+  # add SONAR_TOKEN to GitHub repo Secrets. The badge in README will go
+  # live on the next push.
+  sonarcloud:
+    name: SonarCloud quality gate
+    runs-on: ubuntu-latest
+    needs: [verify]
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Probe for SONAR_TOKEN
+        id: probe
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          if [ -z "$SONAR_TOKEN" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::SONAR_TOKEN secret not set — skipping SonarCloud scan. Enable by creating the SonarCloud org and adding the token in GitHub Settings → Secrets."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: SonarQube scan
+        if: steps.probe.outputs.skip == 'false'
+        uses: SonarSource/sonarqube-scan-action@v5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
   newman:
     name: Newman API contract tests
     runs-on: ubuntu-latest

@@ -8,8 +8,7 @@
 <p align="center">
   <a href="./LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-yellow.svg"></a>
   <a href="https://github.com/ilGentEAcutoO/QuestKit/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/ilGentEAcutoO/QuestKit/actions/workflows/ci.yml/badge.svg?branch=main"></a>
-  <!-- SonarCloud badge pending TASK-029 (org setup + project import) -->
-  <a href="#"><img alt="Quality Gate (pending)" src="https://img.shields.io/badge/SonarCloud-pending-lightgrey"></a>
+  <a href="https://sonarcloud.io/summary/new_code?id=ilGentEAcutoO_QuestKit"><img alt="Quality Gate" src="https://sonarcloud.io/api/project_badges/measure?project=ilGentEAcutoO_QuestKit&metric=alert_status"></a>
   <a href="https://www.npmjs.com/package/@questkit/react"><img alt="npm @questkit/react" src="https://img.shields.io/npm/v/@questkit/react?label=%40questkit%2Freact&color=blue&logo=npm"></a>
   <a href="./packages/embed"><img alt="Embed bundle size" src="https://img.shields.io/badge/embed-59%20KB%20gzip-success?logo=javascript&logoColor=white"></a>
   <a href="https://workers.cloudflare.com/"><img alt="Powered by Cloudflare" src="https://img.shields.io/badge/Powered%20by-Cloudflare-F38020?logo=cloudflare&logoColor=white"></a>
