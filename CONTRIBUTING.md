@@ -51,6 +51,67 @@ pnpm --filter @questkit/core test
 pnpm --filter questkit-worker-api dev
 ```
 
+## Pre-commit checks
+
+Two things run automatically when you `git commit` (see [`.husky/pre-commit`](./.husky/pre-commit)):
+
+1. **`lint-staged`** — runs `prettier --write` on staged
+   `*.{ts,tsx,js,jsx,json,md,css,yml,yaml}` files and `eslint --fix` on staged
+   `*.{ts,tsx,js,jsx}` files. Configured in the root `package.json` under the
+   `lint-staged` key. This is authoritative — a lint or formatting failure
+   will block the commit.
+2. **`gitleaks`** — secret-leak scanner. The hook runs
+   `gitleaks detect --staged --no-banner --config gitleaks.toml` against your
+   staged changes. **If `gitleaks` is not installed locally the hook prints a
+   notice and continues** (graceful degrade), because CI runs `gitleaks-action`
+   on every PR and is the authoritative gate. Installing it locally just gives
+   you a faster feedback loop.
+
+### Installing gitleaks
+
+Pick whichever matches your environment:
+
+```bash
+# macOS / Linux (Homebrew)
+brew install gitleaks
+
+# Windows (winget)
+winget install --id Gitleaks.Gitleaks
+
+# Windows (Scoop)
+scoop install gitleaks
+
+# Any platform with Go 1.21+
+go install github.com/gitleaks/gitleaks/v8@latest
+```
+
+Verify the install:
+
+```bash
+gitleaks version   # should print v8.x
+```
+
+### Running gitleaks manually
+
+Useful before pushing a branch, especially if you cherry-picked or rebased:
+
+```bash
+# Scan all tracked + untracked files in the working tree
+gitleaks detect --no-banner --redact --config gitleaks.toml
+
+# Scan only staged changes (what the pre-commit hook does)
+gitleaks protect --staged --no-banner --redact --config gitleaks.toml
+```
+
+Exit code `0` means clean. A non-zero exit means a secret was found —
+**fix it before committing** (rotate the credential if it ever touched a
+remote, and rewrite history if it landed in a previous commit).
+
+The ruleset lives in [`gitleaks.toml`](./gitleaks.toml) at the repo root.
+It extends the gitleaks default rules and adds a small allowlist for known
+placeholder files (e.g. `.dev.vars.example`). Extend it via PR if you hit a
+false positive.
+
 ## Commit conventions
 
 We follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
