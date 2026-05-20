@@ -65,7 +65,17 @@ app.post("/api/token", async (c) => {
     upstream = await fetch(UPSTREAM_AUTH_URL, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ appId: APP_ID, userId, appSecret }),
+      // Phase 8 / TASK-003: the demo proxy is the ONLY caller that should
+      // request `kind: "demo"` — upstream stamps it on the JWT, and the
+      // `/v1/demo/reset` route gates the dangerous data-wipe on its
+      // presence. Real customer apps that POST `/v1/auth/token` directly
+      // omit `kind` and therefore cannot trip the reset.
+      body: JSON.stringify({
+        appId: APP_ID,
+        userId,
+        appSecret,
+        kind: "demo",
+      }),
     });
   } catch {
     return c.json({ error: "upstream_unreachable" }, 502);

@@ -507,6 +507,34 @@ export class QuestKitClient {
   }
 
   // ============================================================
+  // Demo utilities (Phase 8 / TASK-003)
+  // ============================================================
+
+  /**
+   * Wipe the caller's server-side state — `mission_progress`, `balances`,
+   * `events`, plus the per-user KV scratch space (`idem:${userId}:*` and
+   * `rec:${userId}`). The route is gated server-side: the JWT must carry
+   * `kind: "demo"` AND the userId must start with `demo_`. Real customer
+   * tokens cannot reach the wipe path (the server returns 403 BEFORE any
+   * DB op runs).
+   *
+   * Intended caller: the demo's DevTools "Reset demo user" button.
+   *
+   * POST /v1/demo/reset
+   *   200: { ok: true }
+   *   401: missing/invalid JWT (callers should re-mint and retry)
+   *   403: { error: "not_demo_user" } — gate failed; do not retry
+   *
+   * Idempotent: calling twice on an already-empty user still returns 200.
+   */
+  async demoReset(): Promise<{ ok: true }> {
+    this.ensureAlive();
+    const resp = await this.authedFetch("/v1/demo/reset", { method: "POST" });
+    if (!resp.ok) throw await this.errorFromResponse(resp);
+    return (await resp.json()) as { ok: true };
+  }
+
+  // ============================================================
   // SSE / real-time
   // ============================================================
 

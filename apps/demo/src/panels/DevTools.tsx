@@ -1,9 +1,12 @@
 /**
  * DevTools — top-right floating gear that opens a settings tray.
  *
- * Capabilities (intentionally local-only — no server endpoints):
- *   - Reset user: clear local storage + token cache so the next mint
- *     restarts state.
+ * Capabilities:
+ *   - Reset user: Phase 8 / TASK-003 — calls the server-side
+ *     `POST /v1/demo/reset` to wipe mission_progress / balances / events
+ *     for the current demo userId, then clears the local token cache +
+ *     reloads. Refuses non-demo users with a 403 (the JWT carries
+ *     `kind: "demo"` only when minted via the demo proxy).
  *   - Theme switcher: cycles through light, dark, and a "vivid" preset.
  *     Switching does NOT trigger a React re-render — we mutate the
  *     `--qk-primary` CSS variable directly on <html>, exploiting
@@ -13,6 +16,7 @@
  *   - Simulate time: bumps a fake "demo clock" displayed in the tray
  *     (visual only — real time-simulation belongs to TASK-029+).
  */
+import { useQuestKit } from "@questkit/react";
 import { motion } from "framer-motion";
 import { type ReactElement, useCallback, useEffect, useState } from "react";
 
@@ -81,9 +85,14 @@ function readInitialTheme(): ThemeKey {
 }
 
 export function DevTools(): ReactElement {
+  const client = useQuestKit();
   const [open, setOpen] = useState<boolean>(false);
   const [theme, setTheme] = useState<ThemeKey>(() => readInitialTheme());
   const [simulatedTimeOffset, setSimulatedTimeOffset] = useState<number>(0);
+  const [resetState, setResetState] = useState<"idle" | "pending" | "error">(
+    "idle",
+  );
+  const [resetError, setResetError] = useState<string | null>(null);
 
   const applyTheme = useCallback((key: ThemeKey): void => {
     const preset = THEMES.find((t) => t.key === key);
@@ -119,8 +128,23 @@ export function DevTools(): ReactElement {
     applyTheme(theme);
   }, [theme, applyTheme]);
 
-  const resetUser = useCallback((): void => {
+  const resetUser = useCallback(async (): Promise<void> => {
     if (typeof window === "undefined") return;
+    setResetState("pending");
+    setResetError(null);
+    try {
+      // Server wipe FIRST — if this fails we don't trash the local cache
+      // (otherwise the user reloads into a half-reset state).
+      await client.demoReset();
+    } catch (err) {
+      // Surface a short, actionable message under the button. The most
+      // likely cause in production is a real (non-demo) userId — the
+      // server returns 403 "not_demo_user" in that case.
+      const message = err instanceof Error ? err.message : String(err);
+      setResetState("error");
+      setResetError(message);
+      return;
+    }
     clearTokenCache();
     for (const key of STORAGE_KEYS_TO_CLEAR) {
       try {
@@ -131,7 +155,7 @@ export function DevTools(): ReactElement {
     }
     // Hard reload keeps the demo's React state-and-token cleanup atomic.
     window.location.reload();
-  }, []);
+  }, [client]);
 
   return (
     <div className="fixed right-4 top-20 z-40 sm:top-24">
@@ -260,23 +284,42 @@ export function DevTools(): ReactElement {
             </p>
             <button
               type="button"
-              onClick={resetUser}
-              className="w-full rounded-md border px-2 py-1.5 text-xs font-medium"
+              onClick={() => {
+                void resetUser();
+              }}
+              disabled={resetState === "pending"}
+              aria-busy={resetState === "pending"}
+              className="flex w-full items-center justify-center gap-2 rounded-md border px-2 py-1.5 text-xs font-medium disabled:cursor-wait disabled:opacity-70"
               style={{
                 background: "var(--color-demo-surface-2)",
                 borderColor: "var(--color-demo-border)",
                 color: "var(--color-demo-ink)",
               }}
             >
-              Reset demo user (reloads page)
+              {resetState === "pending" && (
+                <span
+                  aria-hidden="true"
+                  className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-r-transparent"
+                />
+              )}
+              {resetState === "pending"
+                ? "Resetting…"
+                : "Reset demo user (reloads page)"}
             </button>
+            {resetState === "error" && resetError !== null && (
+              <p
+                role="alert"
+                className="text-[10px]"
+                style={{ color: "#b91c1c" }}
+              >
+                {resetError}
+              </p>
+            )}
             <p
               className="text-[10px]"
               style={{ color: "var(--color-demo-muted)" }}
             >
-              Clears local token cache + streak + spin cooldown. Server-side
-              progress remains; sign in as a different userId for a clean slate
-              (Phase 6 task).
+              Clears server-side progress, balance, and event history.
             </p>
           </section>
         </motion.div>

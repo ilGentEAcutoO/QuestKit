@@ -1,6 +1,6 @@
 # QuestKit — Active Tasks (Phase 8 / v0.1.4)
 
-> Last updated: 2026-05-20 18:20
+> Last updated: 2026-05-20 19:20
 > Plan: [`plan.md`](./plan.md) · Requirements: [`requirements.md`](./requirements.md)
 > Predecessor archived at `../archive/001-phase-7-security-hardening-v0.1.3/`
 
@@ -56,31 +56,38 @@
 
 ### Task: [TASK-003] Add server-side demo reset endpoint
 
-- **Status:** ⚪ pending
+- **Status:** 🟢 completed
 - **Priority:** high
 - **Parallel:** yes
-- **Assigned:** unassigned
+- **Assigned:** task-003 worktree (branch `task-003-demo-reset`)
 - **Depends on:** -
 - **Skills:** workflow-work, git-commit, deploy, env-sync
 - **Files:**
   - `workers/api/src/routes/demo.ts` (NEW)
+  - `workers/api/test/demo.route.test.ts` (NEW)
   - `workers/api/src/index.ts`
-  - `workers/api/src/db/schema.ts`
+  - `workers/api/src/auth/jwt.ts`
+  - `workers/api/src/auth/middleware.ts`
   - `workers/api/src/routes/auth.ts`
+  - `workers/api/test/auth.route.test.ts`
   - `apps/demo/src/panels/DevTools.tsx`
-  - `apps/demo/src/lib/client.tsx`
-  - `packages/core/src/client.ts` (add `demoReset()` method)
+  - `apps/demo/src/server/index.ts`
+  - `packages/core/src/client.ts` (added `demoReset()` method)
 - **Subtasks:**
-  - [ ] implement: `POST /v1/demo/reset` — guard with JWT `kind === "demo"` (or `userId` starts with `demo_`), wipe `mission_progress` + `balances` + `events` in one `db.batch`
-  - [ ] implement: delete KV keys `idem:${userId}:*` and `rec:${userId}`
-  - [ ] implement: extend `POST /v1/auth/token` to include `kind: "demo"` claim when called by demo's mint proxy (`apps/demo/src/server/index.ts`)
-  - [ ] implement: SDK `client.demoReset()` method
-  - [ ] implement: rewire DevTools "Reset demo user" to call `client.demoReset()` → clear local cache → reload
-  - [ ] implement: update DevTools copy: "Clears server-side progress, balance, and event history."
-  - [ ] test: API — wipe only affects target userId
-  - [ ] test: API — non-demo JWT → 403
+  - [x] implement: `POST /v1/demo/reset` — guard with JWT `kind === "demo"` AND `userId` starts with `demo_`, wipe `mission_progress` + `balances` + `events` in one `db.batch`
+  - [x] implement: delete KV keys `idem:${userId}:*` (paginated list+delete) and `rec:${userId}`
+  - [x] implement: extend `POST /v1/auth/token` to accept optional `kind: "demo"` body field and stamp it on the JWT payload
+  - [x] implement: demo's mint proxy (`apps/demo/src/server/index.ts`) now forwards `kind: "demo"` to upstream
+  - [x] implement: `JwtPayload.kind` field + `requireAuth` middleware exposes `kind` on `c.var` for downstream routes
+  - [x] implement: SDK `client.demoReset()` method
+  - [x] implement: rewire DevTools "Reset demo user" — calls `client.demoReset()` first, then clears local cache + reloads; spinner during the call; inline error on 403/network failure
+  - [x] implement: DevTools footer copy now reads "Clears server-side progress, balance, and event history."
+  - [x] test: API — wipe only affects target userId (2 demo users isolated)
+  - [x] test: API — non-demo JWT → 403 (both missing-kind and non-`demo_` prefix paths)
+  - [x] test: API — kind:'demo' flows through `/v1/auth/token` end-to-end + unknown `kind` values silently ignored
 - **Progress Notes:**
   - 2026-05-20 18:20 — Created. Browser-confirmed: DevTools dialog text explicitly says "Server-side progress remains; sign in as a different userId for a clean slate (Phase 6 task)." Phase 6 punted on this; doing it now.
+  - 2026-05-20 19:20 — Completed. 9 new tests in `demo.route.test.ts` + 3 in `auth.route.test.ts`; full api worker suite green (191 tests, 1 pre-existing skip). Typecheck clean across api / core / react / demo. Lint green across all 10 workspaces. Security gate uses AND of (`kind === "demo"`) + (`userId.startsWith("demo_")`); response code is 403 `not_demo_user`. DB wipe is atomic via `db.batch([DELETE balances, DELETE events, DELETE mission_progress])`; KV cleanup is best-effort via paginated `CACHE.list({ prefix })` + per-key `delete` (loop guarded against missing-cursor edge case). New SDK export: `QuestKitClient.demoReset()`.
 
 ---
 

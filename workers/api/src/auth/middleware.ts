@@ -26,6 +26,15 @@ import { JwtError, type JwtPayload, verify } from "./jwt";
 interface AuthVars {
   userId: string;
   jti: string;
+  /**
+   * Optional capability marker from the JWT payload. Today only "demo" is
+   * recognised, set by the demo mint proxy (`apps/demo/src/server/index.ts`)
+   * passing `kind: "demo"` to `/v1/auth/token`. The `/v1/demo/reset` route
+   * gates on this value to prevent regular users from wiping their own data
+   * via the dangerous reset endpoint. Undefined for tokens minted via the
+   * default path.
+   */
+  kind: "demo" | undefined;
 }
 
 /**
@@ -120,6 +129,11 @@ export function requireAuth(): MiddlewareHandler<{
 
       c.set("userId", payload.sub);
       c.set("jti", payload.jti);
+      // `kind` is optional in the JWT — surface it on c.var so routes that
+      // gate on it (e.g. `/v1/demo/reset`) can read it without re-decoding
+      // the token. Only "demo" is meaningful today; anything else collapses
+      // to undefined.
+      c.set("kind", payload.kind === "demo" ? "demo" : undefined);
       await next();
     },
   );

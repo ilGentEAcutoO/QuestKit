@@ -19,11 +19,17 @@ const auth = new Hono<{ Bindings: Env }>();
  * Validates the request body shape without pulling in zod (the rest of the
  * codebase is zod-free; one schema isn't worth a 14 KB dep). Returns the
  * narrowed shape on success or a string error code on failure.
+ *
+ * `kind` is optional and ONLY accepts the literal "demo" today. Any other
+ * value silently drops to undefined — the demo mint proxy is the only
+ * legitimate caller, so a stricter allowlist would just mean a bigger
+ * surface area to confuse with no security benefit.
  */
 interface MintBody {
   appId: string;
   appSecret: string;
   userId: string;
+  kind?: "demo";
 }
 
 function parseMintBody(raw: unknown): MintBody | "validation_error" {
@@ -32,6 +38,7 @@ function parseMintBody(raw: unknown): MintBody | "validation_error" {
   const appId = obj.appId;
   const appSecret = obj.appSecret;
   const userId = obj.userId;
+  const kindRaw = obj.kind;
   if (
     typeof appId !== "string" ||
     appId.length === 0 ||
@@ -42,7 +49,12 @@ function parseMintBody(raw: unknown): MintBody | "validation_error" {
   ) {
     return "validation_error";
   }
-  return { appId, appSecret, userId };
+  const body: MintBody = { appId, appSecret, userId };
+  // Whitelist `kind: "demo"`. Any other string is silently ignored — we don't
+  // 400 because a forward-compatible client might pass a future kind and we
+  // don't want to break it; we just don't grant the privilege.
+  if (kindRaw === "demo") body.kind = "demo";
+  return body;
 }
 
 /**
@@ -97,7 +109,7 @@ auth.post("/token", async (c) => {
   if (parsed === "validation_error") {
     return c.json({ error: "validation_error" }, 400);
   }
-  const { appSecret, userId } = parsed;
+  const { appSecret, userId, kind } = parsed;
 
   // Step 2 — timing-safe compare against APP_SECRET. We deliberately do NOT
   // differentiate "wrong appId" from "wrong secret" — both surface as
@@ -113,12 +125,22 @@ auth.post("/token", async (c) => {
 
   // Step 4 — mint the JWT. Lifetime is 1 hour per plan §5; the JTI is a
   // 16-byte random hex string that doubles as the denylist key in KV.
+  //
+  // Phase 8 / TASK-003: when `kind === "demo"` we add it to the JWT payload
+  // so the `/v1/demo/reset` route can gate dangerous data-wiping. The claim
+  // is intentionally not exposed in the response — only the JWT carries it
+  // — because the only authoritative reader is `requireAuth` downstream.
   const iatSec = Math.floor(Date.now() / 1000);
   const expSec = iatSec + 3600;
-  const token = await sign(
-    { sub: userId, iat: iatSec, exp: expSec, jti: randomJti() },
-    c.env.JWT_SECRET,
-  );
+  const payload: {
+    sub: string;
+    iat: number;
+    exp: number;
+    jti: string;
+    kind?: "demo";
+  } = { sub: userId, iat: iatSec, exp: expSec, jti: randomJti() };
+  if (kind === "demo") payload.kind = "demo";
+  const token = await sign(payload, c.env.JWT_SECRET);
 
   // expiresAt is returned in ms-epoch for SDK convenience (JS `Date.now()` is
   // ms; pairing the unit avoids the SDK accidentally multiplying by 1000).
