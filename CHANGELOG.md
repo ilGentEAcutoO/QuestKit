@@ -5,9 +5,143 @@ All notable changes to QuestKit are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.0] — 2026-05-20
+
+First public release. Six-day, six-phase build of an embeddable
+Cloudflare-native gamification SDK — React component library, vanilla
+JS embed, REST + SSE API, webhook ingestion pipeline, Workers-AI
+recommendations — with a live demo at https://questkit.jairukchan.com.
 
 ### Added
 
-- Initial monorepo scaffold — see [`instruction/work/plan.md`](instruction/work/plan.md)
-  for the full build plan.
+#### Packages (4 publishable)
+
+- `@questkit/types` — strict TypeScript types for events, missions,
+  rewards, balances, campaigns, and the SDKUpdate discriminated union.
+- `@questkit/core` — framework-neutral SDK: `QuestKitClient`, rule
+  engine (`daily`/`weekly`/`lifetime` windows + filter clauses), event
+  queue with retry, SSE client with reconnect + polling fallback, idem-
+  potency. 87 Jest tests.
+- `@questkit/react` — React component library (peer-dep `^18.3 || ^19`):
+  `QuestKitProvider`, hooks (`useMissions`, `useMission`, `useBalance`,
+  `useEvent`, `useCampaign`, `useRecommendations`), components
+  (`MissionList`, `MissionCard` with `iconUrl` render, `CoinBalance`,
+  `CampaignBanner`, `RewardClaimToast`, `ProgressBar`,
+  `RecommendedMissions`), and mini-games (`SpinWheel`, `ScratchCard`).
+  125 RTL tests.
+- `@questkit/embed` — vanilla `<script>` IIFE bundle (~59 KB gz),
+  Shadow-DOM isolated, mounts on `data-questkit` attribute, re-mounts
+  on `qk:reinit` events for SPA hosts. 21 tests.
+
+#### Workers (6 deployed)
+
+- `questkit-worker-api` — Hono REST + SSE on
+  `api.questkit.jairukchan.com`. Bindings: D1 (truth), KV (idempotency
+  - JWT denylist), R2 (assets), Durable Objects (`RateLimiter` SQLite
+    sliding-window + `SSEHub` ReadableStream fanout), Queue (producer),
+    Analytics Engine, Workers AI
+    (`@cf/meta/llama-3.1-8b-instruct-fast`). 165 vitest tests via
+    `@cloudflare/vitest-pool-workers`.
+- `questkit-worker-webhook-relay` — Stripe-style HMAC verification +
+  Cloudflare Queue producer at `webhook.questkit.jairukchan.com`.
+- `questkit-worker-webhook-consumer` — Queue consumer that invokes the
+  api via `WorkerEntrypoint` RPC (typed, zero-serialization). DLQ with
+  `max_retries: 5`, exponential backoff.
+- `questkit-worker-demo` — Vite SPA at `questkit.jairukchan.com` with
+  4 scenarios (e-commerce, streaming, daily, mini-games), 3 floating
+  panels (DevTools, AIRecommendations, EventLog), inline /api/token
+  proxy. All 5 routes meet Lighthouse mobile gates ≥ 0.92 perf, 1.00
+  a11y, 1.00 best-practices.
+- `questkit-worker-docs` — Docusaurus 3.10.1 SSG at
+  `docs.questkit.jairukchan.com`. 36 routes. Tailwind v4 via custom
+  PostCSS plugin.
+- `questkit-worker-play` — vanilla-embed playground at
+  `play.questkit.jairukchan.com` (plain HTML / WordPress mock /
+  iframe).
+
+#### Documentation
+
+- 31-page Docusaurus site (concepts, react, embed, api, webhooks, faq,
+  theming, self-hosting).
+- 6 ADRs (`docs/decisions/`): Cloudflare-only stack, React over Vue,
+  SSE over WebSockets, DOs for rate-limiting, Workers AI for
+  personalisation, test boundaries (service stubs vs `cloudflare:test`
+  pool-workers).
+- `docs/CLOUDFLARE_SETUP.md` + `docs/SELF_HOSTING.md` + interactive
+  `scripts/setup.sh` for 10-minute self-host on a clean account.
+- README v1 (272 lines) with mermaid architecture diagram, 6 shields
+  badges, dual quick-starts (React + embed), tech stack table.
+- 1280×640 social-preview PNG + 12-second demo GIF generated via MCP
+  Playwright.
+- 5-scenario Playwright E2E smoke spec running against either local
+  dev or live prod (`E2E_TARGET=prod`). 5/5 green vs production.
+
+#### CI / Hygiene
+
+- GitHub Actions workflow: lint, typecheck, test, gitleaks (with
+  custom allowlist), Newman API contract tests (40 assertions across
+  20 requests).
+- Conventional Commits, MIT license, Code of Conduct (Contributor
+  Covenant 2.1), Security disclosure policy, dependabot weekly bumps.
+- `gitleaks.toml` configured to scan history; `pnpm` overrides pin
+  patched versions for transitive `serialize-javascript`,
+  `http-proxy-agent`, `ws`.
+
+### Fixed
+
+Four production bugs caught during first live demo→api traffic (all
+hidden by mock-heavy unit tests):
+
+- **`PollingClient` unbound `setInterval`/`clearInterval`** — storing
+  the browser timer as a class property then calling it as a method
+  invoked it with `this === PollingClient`, which the browser rejects
+  with `TypeError: Illegal invocation`. Crashed the SSE→polling fallback
+  path entirely.
+- **`QuestKitClient` unbound `fetch`** — same root cause as above. All
+  `authedFetch` calls (campaigns / missions / balance / recommendations)
+  silently threw. Surfaced as "Couldn't load campaign" / "Couldn't load
+  missions" alerts in the demo. Bound `fetch.bind(globalThis)` in the
+  constructor.
+- **`QuestKitClient.authedFetch` single-shot 401 retry** — defensive
+  production-grade SDK pattern: if the first attempt's token is stale
+  or empty (race on first mount, expired since cache, server rotated
+  `JWT_SECRET`), refetch the token via `getToken()` and replay. Bubbles
+  up only if the retry also 401s.
+- **`questkit-worker-api` missing CORS middleware** — plan.md §5 specced
+  "SDK runs on any host" but no `hono/cors` was ever wired. Added
+  `app.use('*', cors({ origin: '*', allowMethods: GET/POST/OPTIONS,
+allowHeaders: Content-Type/Authorization/Idempotency-Key, maxAge:
+86400, credentials: false }))`.
+
+Plus:
+
+- `MissionCard` now renders `mission.iconUrl` as a 32×32 decorative
+  `<img>` (`alt=""` + `aria-hidden="true"`, `loading="lazy"`,
+  `decoding="async"`, explicit dims for CLS prevention).
+- Docusaurus SSG unblocked via a three-layer fix: `null-loader` on
+  `.css` + `client-modules.js`, `future.faster.swcJsLoader: true` +
+  `@swc/core` devDep, removing `"type": "module"` from
+  `apps/docs/package.json`. 36/36 routes render.
+- `apps/docs/docusaurus.config.ts` migrated from top-level
+  `onBrokenMarkdownLinks` to `markdown.hooks.onBrokenMarkdownLinks`
+  (Docusaurus v4 forward-compat).
+- Newman CI unblock chain (8 commits): bash prefires → bot-management
+  bypass → Newman-native collection prefires → `pm.variables` scope
+  fix → SSE folder removal. End state: 40/40 assertions pass.
+- 3 dependabot vulnerabilities closed via `pnpm.overrides`:
+  `serialize-javascript@^7.0.5` (HIGH RCE + MEDIUM DoS),
+  `http-proxy-agent@^7.0.0` (drops `@tootallnate/once` LOW), and
+  `ws@^8.20.1` (auto-dismissed MEDIUM memory disclosure).
+- JWT signature-tamper test fix: flip the FIRST char of the base64url
+  signature (fully-used 6-bit position) instead of the last (4 unused
+  bits → intermittent CI flake when the unlucky path hits unused bits).
+
+### Infrastructure
+
+- Custom domains wired via `wrangler.jsonc` `routes[].custom_domain:
+true`. CF auto-provisions DNS + SSL on first deploy. All 5 worker
+  URLs return HTTPS 200.
+- `APP_SECRET` rotation synchronised across api worker / demo worker /
+  GitHub Actions secret `QUESTKIT_APP_SECRET`.
+
+[0.1.0]: https://github.com/ilGentEAcutoO/QuestKit/releases/tag/v0.1.0
