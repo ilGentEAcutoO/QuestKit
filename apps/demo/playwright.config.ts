@@ -25,7 +25,14 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   workers: 1,
-  reporter: process.env.CI ? "github" : "list",
+  // Dual reporter on CI: `github` annotates the workflow log with
+  // failure summaries; `html` writes a self-contained ./playwright-report
+  // directory that the deploy.yml uploads as an artifact on failure
+  // (TASK-009 — maintainer downloads it to see screenshots, videos,
+  // and traces). `never` keeps Playwright from auto-opening the report
+  // in a browser on local runs (we still get the `list` reporter for
+  // those via the else branch).
+  reporter: process.env.CI ? [["github"], ["html", { open: "never" }]] : "list",
   timeout: 30_000,
   expect: { timeout: 5_000 },
 

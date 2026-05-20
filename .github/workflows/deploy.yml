@@ -235,3 +235,41 @@ jobs:
           }
           smoke https://api.questkit.jairukchan.com/v1/health "api /v1/health"
           smoke https://questkit.jairukchan.com/             "demo apex"
+
+      # ─── Post-deploy E2E gate (Phase 8 / TASK-009) ───────────────────
+      # Runs the full Playwright button-coverage suite against the live
+      # apex (https://questkit.jairukchan.com). Any test failure FAILS
+      # this deploy job, preventing a green-but-broken deploy. The pnpm
+      # install + browser install + suite run together typically take
+      # 2–3 minutes; we cap at 15 to absorb cold-cache CI variance.
+      #
+      # Browsers: chromium only (the playwright config also includes
+      # `mobile-chrome`, also chromium-based; both ship with the single
+      # browser install). `--with-deps` pulls the OS shared libraries the
+      # ubuntu-latest runner needs to launch Chromium headless.
+      - name: Install Playwright browsers
+        run: pnpm --filter @questkit/demo exec playwright install chromium --with-deps
+        timeout-minutes: 5
+
+      - name: Run E2E suite against live deploy
+        run: pnpm --filter @questkit/demo e2e:prod
+        timeout-minutes: 15
+        env:
+          # Forwarded to playwright.config.ts. The config switches baseURL
+          # to https://questkit.jairukchan.com and skips the local vite
+          # webServer block (no dev server in CI here).
+          E2E_TARGET: prod
+          CI: "true"
+
+      # On failure, upload the Playwright HTML report so a maintainer can
+      # download it from the workflow run page and inspect screenshots,
+      # videos, and traces (videos + traces are retained on failure per
+      # playwright.config.ts).
+      - name: Upload Playwright HTML report (on failure)
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: playwright-report
+          path: apps/demo/playwright-report/
+          retention-days: 7
+          if-no-files-found: ignore
