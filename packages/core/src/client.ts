@@ -152,7 +152,12 @@ export class QuestKitClient {
     this.baseUrl = config.baseUrl.replace(/\/$/, "");
     this.appId = config.appId;
     this.getTokenFn = config.getToken;
-    this.fetchImpl = config.fetchImpl ?? fetch;
+    // Bind fetch to globalThis so `this.fetchImpl(...)` doesn't invoke it as
+    // a method on the QuestKitClient instance — the browser's native fetch
+    // rejects that with "TypeError: Illegal invocation" (same root cause as
+    // the setInterval issue in polling.ts). Tests inject their own fetchImpl
+    // so the bug only surfaces in real browsers.
+    this.fetchImpl = config.fetchImpl ?? fetch.bind(globalThis);
     this.storage = config.storage ?? detectStorage();
     this.pollIntervalMs = config.pollIntervalMs ?? 5000;
     this.events = new EventQueue({ storage: this.storage });
@@ -559,14 +564,27 @@ export class QuestKitClient {
       headers?: Record<string, string>;
     } = {},
   ): Promise<Response> {
-    const token = await this.getTokenFn();
+    const url = `${this.baseUrl}${path}`;
     const baseHeaders = init.headers ?? {};
-    const headers: Record<string, string> = {
-      ...baseHeaders,
-      authorization: `Bearer ${token}`,
-    };
     const { headers: _ignored, ...rest } = init;
-    return this.fetchImpl(`${this.baseUrl}${path}`, { ...rest, headers });
+
+    // Single-shot retry on 401: caller's getToken() may have returned a stale
+    // or empty token (race on first mount, expired since cache populated, or
+    // server rotated JWT_SECRET). Re-fetch the token once and replay. If the
+    // retry also 401s the response bubbles up — that's a real auth failure,
+    // not a transient race.
+    const attempt = async (): Promise<Response> => {
+      const token = await this.getTokenFn();
+      const headers: Record<string, string> = {
+        ...baseHeaders,
+        authorization: `Bearer ${token}`,
+      };
+      return this.fetchImpl(url, { ...rest, headers });
+    };
+
+    const first = await attempt();
+    if (first.status !== 401) return first;
+    return attempt();
   }
 
   private async errorFromResponse(resp: Response): Promise<QuestKitError> {

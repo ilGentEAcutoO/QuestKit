@@ -67,8 +67,15 @@ export class PollingClient {
   constructor(opts: PollingOpts) {
     this.opts = opts;
     this.intervalMs = opts.intervalMs ?? DEFAULT_INTERVAL_MS;
-    this.setIntervalImpl = opts.setIntervalImpl ?? setInterval;
-    this.clearIntervalImpl = opts.clearIntervalImpl ?? clearInterval;
+    // Bind the browser timers to globalThis so they're not called as methods
+    // on `this`. Without bind, `this.setIntervalImpl(...)` invokes the browser
+    // setInterval with `this === PollingClient`, which the browser rejects
+    // with "TypeError: Illegal invocation" (setInterval requires its native
+    // host as receiver). Tests pass their own mock fns so the bug only
+    // surfaces in real browsers.
+    this.setIntervalImpl = opts.setIntervalImpl ?? setInterval.bind(globalThis);
+    this.clearIntervalImpl =
+      opts.clearIntervalImpl ?? clearInterval.bind(globalThis);
   }
 
   /** Start polling. Idempotent — calling twice has no effect after the first. */

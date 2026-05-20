@@ -15,6 +15,7 @@
 import type { Event } from "@questkit/types";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 import { HTTPException } from "hono/http-exception";
 import authRouter from "./routes/auth";
 import balanceRouter from "./routes/balance";
@@ -26,6 +27,28 @@ import sseRouter from "./routes/sse";
 import { ingestEventCore } from "./services/ingest";
 
 const app = new Hono<{ Bindings: Env }>();
+
+/**
+ * Permissive CORS — per plan.md §5: the SDK is designed to run on any host
+ * (React component library + vanilla embed + first-party demo / docs / play),
+ * so the API accepts requests from any origin. The JWT (HS256, JTI denylist)
+ * is the security boundary, not the Origin header. `/v1/auth/token` itself
+ * carries the appSecret in the body and is intended to be called server-side
+ * only — but allowing cross-origin POST keeps proxy-based mint flows like
+ * the demo's `/api/token` from breaking when the demo and api live on
+ * different hostnames.
+ */
+app.use(
+  "*",
+  cors({
+    origin: "*",
+    allowMethods: ["GET", "POST", "OPTIONS"],
+    allowHeaders: ["Content-Type", "Authorization", "Idempotency-Key"],
+    exposeHeaders: ["X-Idempotent-Replay"],
+    maxAge: 86400,
+    credentials: false,
+  }),
+);
 
 /**
  * Liveness probe. Phase 1 smoke test — wired to a deploy verification step.
