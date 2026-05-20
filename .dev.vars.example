@@ -9,3 +9,8 @@ WEBHOOK_HMAC_SECRET=
 
 # App-level shared secret for /v1/auth/token — generate: openssl rand -base64 48
 APP_SECRET=
+
+# Note: ALLOWED_ORIGINS is a non-secret allowlist (CSV of full origins)
+# used by the cookie-based auth CSRF guard — see apps/docs/docs/api/auth.md.
+# It's declared as a `vars` entry in workers/api/wrangler.jsonc, NOT a secret.
+# Set it per-env there (or via wrangler.dev.jsonc locally), not in .dev.vars.
