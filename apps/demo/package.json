@@ -13,6 +13,8 @@
     "deploy:dry-run": "vite build && wrangler deploy --dry-run",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
+    "e2e": "playwright test",
+    "e2e:prod": "cross-env E2E_TARGET=prod playwright test",
     "clean": "rimraf dist .turbo .wrangler"
   },
   "dependencies": {
@@ -26,10 +28,12 @@
     "react-router-dom": "catalog:"
   },
   "devDependencies": {
+    "@playwright/test": "^1.55.0",
     "@tailwindcss/vite": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "@vitejs/plugin-react": "catalog:",
+    "cross-env": "^7.0.3",
     "rimraf": "^6.0.1",
     "tailwindcss": "catalog:",
     "typescript": "catalog:",
