@@ -256,7 +256,17 @@ export function MissionCard({
                 : `Claim reward for ${mission.title}`
           }
           onClick={(): void => {
-            void handleClaim();
+            // Defensive: handleClaim may reject if onClaim rejects (e.g.
+            // SDK-side QuestKitError(timeout) from TASK-005). The local
+            // `isClaiming` state still resets via the finally inside
+            // handleClaim — but without this .catch, a rejected onClaim
+            // surfaces as an unhandled-rejection in the host's window.
+            // The caller (e.g. useMissionClaim) is the right place to
+            // report the error; here we only need to keep the card
+            // self-consistent.
+            void handleClaim().catch(() => {
+              /* error already surfaced via onClaim's own rejection chain */
+            });
           }}
           onKeyDown={handleClaimKey}
         >

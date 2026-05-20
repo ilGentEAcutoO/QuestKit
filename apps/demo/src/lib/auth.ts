@@ -22,16 +22,38 @@ interface CacheEntry {
 }
 
 const REFRESH_THRESHOLD_MS = 60_000; // refresh if < 60s of life remaining
+/**
+ * Browser → demo-worker /api/token timeout (TASK-005, v0.1.4).
+ *
+ * Even after backend hardening lands, the browser must enforce its own
+ * deadline so a stalled mint hop can never wedge the demo's bootstrap
+ * spinner — a 10s ceiling matches the QuestKitClient default and ensures
+ * we surface a useful "Could not start the demo" error within 10s instead
+ * of spinning forever.
+ */
+const MINT_TIMEOUT_MS = 10_000;
 
 const cache = new Map<string, CacheEntry>();
 const inFlight = new Map<string, Promise<MintResponse>>();
 
 async function fetchMint(userId: string): Promise<MintResponse> {
-  const resp = await fetch("/api/token", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ userId }),
-  });
+  let resp: Response;
+  try {
+    resp = await fetch("/api/token", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ userId }),
+      signal: AbortSignal.timeout(MINT_TIMEOUT_MS),
+    });
+  } catch (err) {
+    // AbortSignal.timeout fires a DOMException("TimeoutError"). Surface a
+    // human-readable error so the DemoClientProvider's error UI shows
+    // something better than "TimeoutError".
+    if (err instanceof Error && err.name === "TimeoutError") {
+      throw new Error(`mintToken timed out after ${MINT_TIMEOUT_MS}ms`);
+    }
+    throw err;
+  }
   if (!resp.ok) {
     let detail = `HTTP ${resp.status}`;
     try {
