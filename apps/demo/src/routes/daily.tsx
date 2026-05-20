@@ -7,10 +7,12 @@
  * comes from useMissions on next refetch.
  */
 import { MissionCard, useEvent, useMissions } from "@questkit/react";
+
 import { AnimatePresence, motion } from "framer-motion";
 import { type ReactElement, useState } from "react";
-
 import { SceneHeading } from "../components/SceneHeading";
+
+import { useMissionClaim } from "../lib/useMissionClaim";
 
 const STREAK_STORAGE_KEY = "qk-demo-daily-streak";
 
@@ -55,6 +57,7 @@ function startOfDay(now: number): number {
 
 export function DailyRoute(): ReactElement {
   const { fireEvent, isFiring } = useEvent();
+  const handleClaim = useMissionClaim();
   const [streak, setStreak] = useState<StreakState>(() => readStreak());
   const [justClicked, setJustClicked] = useState<boolean>(false);
 
@@ -191,6 +194,7 @@ export function DailyRoute(): ReactElement {
                   <MissionCard
                     mission={mission}
                     progress={missions.data?.progress[mission.id] ?? undefined}
+                    onClaim={handleClaim}
                   />
                 </li>
               ))}

@@ -9,17 +9,12 @@
  * Each product carries an `amount` and `category` so the fired payload
  * exercises the full filter matrix.
  */
-import {
-  CampaignBanner,
-  MissionList,
-  useEvent,
-  useQuestKit,
-} from "@questkit/react";
+import { CampaignBanner, MissionList, useEvent } from "@questkit/react";
 import { motion } from "framer-motion";
-import { type ReactElement, useCallback, useState } from "react";
+import { type ReactElement, useState } from "react";
 
-import { useDemoToast } from "../components/DemoToastHost";
 import { SceneHeading } from "../components/SceneHeading";
+import { useMissionClaim } from "../lib/useMissionClaim";
 
 interface Product {
   id: string;
@@ -76,31 +71,8 @@ const PRODUCTS: Product[] = [
 
 export function EcommerceRoute(): ReactElement {
   const { fireEvent, isFiring } = useEvent();
-  const client = useQuestKit();
-  const { show: showToast } = useDemoToast();
+  const handleClaim = useMissionClaim();
   const [buying, setBuying] = useState<string | null>(null);
-
-  /**
-   * Mission-claim handler wired into <MissionList onClaim>. Without this the
-   * MissionCard's Claim button fires its analytics event but never actually
-   * POSTs to /v1/missions/:id/claim — the user sees the button toggle to
-   * "Claiming…" and then back to "Claim" with no balance change. Surfaced by
-   * the live click-through PDCA sweep.
-   */
-  const handleClaim = useCallback(
-    async (missionId: string): Promise<void> => {
-      try {
-        const result = await client.claimMission(missionId);
-        showToast(result.reward);
-      } catch (err) {
-        // Best-effort. The mission card will revert from "Claiming…" via its
-        // own finally block; we don't need a UI rollback here. Errors land
-        // in the EventLog drawer through the SDK's existing error path.
-        console.warn("[ecommerce] claim failed", err);
-      }
-    },
-    [client, showToast],
-  );
 
   async function handleBuy(product: Product): Promise<void> {
     setBuying(product.id);

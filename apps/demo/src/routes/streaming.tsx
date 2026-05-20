@@ -12,11 +12,13 @@
  * server is offline (degraded mode demo).
  */
 import { MissionCard, useEvent, useMissions } from "@questkit/react";
+
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { type ReactElement, useState } from "react";
-
 import { useDemoToast } from "../components/DemoToastHost";
+
 import { SceneHeading } from "../components/SceneHeading";
+import { useMissionClaim } from "../lib/useMissionClaim";
 
 interface Video {
   id: string;
@@ -78,6 +80,7 @@ export function StreamingRoute(): ReactElement {
   const { fireEvent, isFiring } = useEvent();
   const { show: showToast } = useDemoToast();
   const reduced = useReducedMotion();
+  const handleClaim = useMissionClaim();
   const [watchedToday, setWatchedToday] = useState<number>(0);
   const [busy, setBusy] = useState<string | null>(null);
   const [bingeUnlocked, setBingeUnlocked] = useState<boolean>(false);
@@ -292,6 +295,7 @@ export function StreamingRoute(): ReactElement {
                   progress={
                     missionsState.data?.progress[mission.id] ?? undefined
                   }
+                  onClaim={handleClaim}
                 />
               </li>
             ))}
