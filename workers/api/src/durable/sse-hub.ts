@@ -73,7 +73,19 @@ export class SSEHub extends DurableObject<Env> {
       return this.subscribe();
     }
     if (req.method === "POST" && url.pathname === "/broadcast") {
-      return this.broadcast(await req.text());
+      // The caller may abort mid-request (Phase 8 / v0.1.4 TASK-001 wires
+      // an `AbortSignal.timeout(2000)` on every routes/* stub.fetch). When
+      // that happens, `req.text()` rejects with "Can't read from request
+      // stream because client disconnected". Catching here keeps the DO
+      // from emitting an unhandled-rejection log line — the caller has
+      // already moved on, so a clean 4xx is the right shape.
+      let body: string;
+      try {
+        body = await req.text();
+      } catch {
+        return new Response("aborted", { status: 499, statusText: "Aborted" });
+      }
+      return this.broadcast(body);
     }
     return new Response("not_found", { status: 404 });
   }
@@ -137,6 +149,14 @@ export class SSEHub extends DurableObject<Env> {
   }
 
   /**
+   * Per-writer write timeout. A healthy SSE writer should accept a chunk in
+   * <1ms — anything in the 1000ms range is a stuck client. Capping here
+   * keeps a wedged subscriber from holding the broadcast even though we now
+   * run writers in parallel.
+   */
+  private static readonly WRITER_TIMEOUT_MS = 1000;
+
+  /**
    * Broadcast a serialised SDKUpdate to every live subscriber.
    *
    * SSE framing:  `event: update\ndata: <body>\n\n`
@@ -148,29 +168,84 @@ export class SSEHub extends DurableObject<Env> {
    * newline, which would otherwise require multiple `data:` lines per SSE
    * spec.
    *
-   * Stale-writer GC: if a `write()` rejects (writer is closed/aborted) we
-   * record the dead writer and remove it from the set after the loop, so we
-   * don't mutate the set mid-iteration.
+   * Stale-writer GC: if a `write()` rejects (writer is closed/aborted) OR
+   * exceeds the per-writer timeout we record the dead writer and remove
+   * it from the set after the loop, so we don't mutate the set
+   * mid-iteration.
    *
-   * @returns 200 with `{delivered: N}` - N excludes stale writers.
+   * Parallelism + timeout (Phase 8 / v0.1.4 TASK-001):
+   *   The previous implementation iterated writers serially with `await
+   *   w.write()`, so a SINGLE stalled writer (slow client / backpressured
+   *   stream) blocked every healthy writer behind it — and indirectly the
+   *   `routes/missions.ts` claim handler that awaited this RPC. We now
+   *   write to all writers in parallel via `Promise.allSettled` and cap
+   *   each individual write at `WRITER_TIMEOUT_MS` with a `Promise.race`
+   *   against a `setTimeout`. The timer is cleared on success so we don't
+   *   leak handles in the steady-state hot path.
+   *
+   *   Stalled writers are GC'd just like erroring writers — they can't
+   *   recover within the broadcast cycle, and clients reconnect via the
+   *   SDK's backoff loop (TASK-012) if they were briefly slow.
+   *
+   * @returns 200 with `{delivered: N}` - N excludes stale writers
+   *   (timed-out + error-throwing).
    */
   private async broadcast(body: string): Promise<Response> {
     if (this.writers.size === 0) {
       return Response.json({ delivered: 0 });
     }
     const message = this.encoder.encode(`event: update\ndata: ${body}\n\n`);
+
+    /**
+     * Per-writer write attempt: race the real `write()` against a 1s
+     * timeout. On success: clear the timer (no leaked handle) and report
+     * `{ ok: true }`. On error OR timeout: report `{ ok: false, writer }`
+     * so the caller can GC the dead writer.
+     *
+     * We capture the writer in the result rather than mutating the
+     * `writers` set inline so a single iteration over `Promise.allSettled`
+     * results does the GC in one shot — matching the original "don't
+     * mutate the set mid-iteration" contract.
+     */
+    const attempts = Array.from(this.writers).map(
+      async (
+        w,
+      ): Promise<
+        | { ok: true }
+        | { ok: false; writer: WritableStreamDefaultWriter<Uint8Array> }
+      > => {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          await Promise.race([
+            w.write(message),
+            new Promise<never>((_, reject) => {
+              timer = setTimeout(
+                () => reject(new Error("writer_timeout")),
+                SSEHub.WRITER_TIMEOUT_MS,
+              );
+            }),
+          ]);
+          return { ok: true };
+        } catch {
+          return { ok: false, writer: w };
+        } finally {
+          if (timer !== undefined) clearTimeout(timer);
+        }
+      },
+    );
+
+    const results = await Promise.allSettled(attempts);
     let delivered = 0;
-    const stale: WritableStreamDefaultWriter<Uint8Array>[] = [];
-    for (const w of this.writers) {
-      try {
-        await w.write(message);
-        delivered++;
-      } catch {
-        stale.push(w);
+    for (const r of results) {
+      if (r.status === "fulfilled") {
+        if (r.value.ok) {
+          delivered++;
+        } else {
+          this.writers.delete(r.value.writer);
+        }
       }
-    }
-    for (const w of stale) {
-      this.writers.delete(w);
+      // r.status === "rejected" cannot happen here — the inner async
+      // function never throws; it always resolves with { ok, writer? }.
     }
     return Response.json({ delivered });
   }

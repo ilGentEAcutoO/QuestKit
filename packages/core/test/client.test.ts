@@ -232,6 +232,166 @@ describe("questKitClient.fireEvent", () => {
   });
 });
 
+describe("questKitClient.onFireEventSuccess (TASK-006 optimistic updates)", () => {
+  // The SDK fires a `onFireEventSuccess(missionsUpdated)` callback after
+  // every successful fireEvent. The React `useMissions` hook listens to
+  // this and bumps `currentCount` optimistically — so counters keep moving
+  // even when the SSE channel is degraded. See useMissions.ts for the
+  // (intentionally simple) merge policy.
+  it("invokes registered callbacks with missionsUpdated on success", async () => {
+    const { fetchImpl } = mockFetch([
+      jsonResponse({
+        accepted: true,
+        eventId: "ev-success",
+        missionsUpdated: ["m1", "m2"],
+      }),
+    ]);
+    const client = makeClient(fetchImpl);
+    const cb = jest.fn();
+    const unsub = client.onFireEventSuccess(cb);
+
+    await client.fireEvent({ name: "purchase.completed", payload: {} });
+
+    expect(cb).toHaveBeenCalledTimes(1);
+    expect(cb).toHaveBeenCalledWith(["m1", "m2"]);
+
+    unsub();
+    client.destroy();
+  });
+
+  it("does NOT invoke callbacks when fireEvent rejects (4xx)", async () => {
+    const { fetchImpl } = mockFetch([
+      jsonResponse({ error: "invalid_event" }, 400),
+    ]);
+    const client = makeClient(fetchImpl);
+    const cb = jest.fn();
+    client.onFireEventSuccess(cb);
+
+    await expect(
+      client.fireEvent({ name: "x", payload: {} }),
+    ).rejects.toMatchObject({ code: "validation_error" });
+
+    expect(cb).not.toHaveBeenCalled();
+    client.destroy();
+  });
+
+  it("does NOT invoke callbacks when fireEvent is queued (5xx)", async () => {
+    const { fetchImpl } = mockFetch([jsonResponse({ error: "boom" }, 503)]);
+    const client = makeClient(fetchImpl);
+    const cb = jest.fn();
+    client.onFireEventSuccess(cb);
+
+    const r = await client.fireEvent({ name: "x", payload: {} });
+    expect(r.queued).toBe(true);
+    // The callback is only for *successful* immediate posts (and the eventual
+    // success of a queued retry, which we don't exercise here).
+    expect(cb).not.toHaveBeenCalled();
+    client.destroy();
+  });
+
+  it("unsubscribe removes the callback", async () => {
+    const { fetchImpl } = mockFetch([
+      jsonResponse({
+        accepted: true,
+        eventId: "ev1",
+        missionsUpdated: ["m1"],
+      }),
+      jsonResponse({
+        accepted: true,
+        eventId: "ev2",
+        missionsUpdated: ["m1"],
+      }),
+    ]);
+    const client = makeClient(fetchImpl);
+    const cb = jest.fn();
+    const unsub = client.onFireEventSuccess(cb);
+
+    await client.fireEvent({ name: "a", payload: {} });
+    expect(cb).toHaveBeenCalledTimes(1);
+
+    unsub();
+    await client.fireEvent({ name: "b", payload: {} });
+    expect(cb).toHaveBeenCalledTimes(1);
+    client.destroy();
+  });
+
+  it("fans out to multiple listeners", async () => {
+    const { fetchImpl } = mockFetch([
+      jsonResponse({
+        accepted: true,
+        eventId: "ev1",
+        missionsUpdated: ["m1"],
+      }),
+    ]);
+    const client = makeClient(fetchImpl);
+    const a = jest.fn();
+    const b = jest.fn();
+    client.onFireEventSuccess(a);
+    client.onFireEventSuccess(b);
+
+    await client.fireEvent({ name: "x", payload: {} });
+    expect(a).toHaveBeenCalledWith(["m1"]);
+    expect(b).toHaveBeenCalledWith(["m1"]);
+    client.destroy();
+  });
+
+  it("a throwing listener does not block fanout to other listeners", async () => {
+    const { fetchImpl } = mockFetch([
+      jsonResponse({
+        accepted: true,
+        eventId: "ev1",
+        missionsUpdated: ["m1"],
+      }),
+    ]);
+    const client = makeClient(fetchImpl);
+    const bad = jest.fn().mockImplementation(() => {
+      throw new Error("listener boom");
+    });
+    const good = jest.fn();
+    client.onFireEventSuccess(bad);
+    client.onFireEventSuccess(good);
+
+    await client.fireEvent({ name: "x", payload: {} });
+    expect(bad).toHaveBeenCalled();
+    expect(good).toHaveBeenCalledWith(["m1"]);
+    client.destroy();
+  });
+
+  it("fires when a previously-queued event eventually succeeds (via flushEvents)", async () => {
+    // The first POST returns 503, queueing the event. Subsequent POSTs
+    // succeed. Whether the success comes from the background flush
+    // kicked off by fireEvent or from the explicit flushEvents() below,
+    // the listener must be invoked with the server's missionsUpdated.
+    const { fetchImpl } = mockFetch([
+      jsonResponse({ error: "boom" }, 503),
+      jsonResponse({
+        accepted: true,
+        eventId: "ev-retry",
+        missionsUpdated: ["m1"],
+      }),
+    ]);
+    const client = makeClient(fetchImpl);
+    const cb = jest.fn();
+    client.onFireEventSuccess(cb);
+
+    const r = await client.fireEvent({ name: "x", payload: {} });
+    expect(r.queued).toBe(true);
+
+    // Yield to pending microtasks so the background flush kicked off
+    // inside fireEvent can drain, then explicitly flush as a backstop.
+    // Polling beats a fixed setTimeout — flush completion order is not
+    // load-bearing for the test, but the dispatch IS.
+    for (let i = 0; i < 10 && cb.mock.calls.length === 0; i += 1) {
+      await new Promise((r) => setTimeout(r, 0));
+      await client.flushEvents();
+    }
+
+    expect(cb).toHaveBeenCalledWith(["m1"]);
+    expect(cb).toHaveBeenCalledTimes(1);
+    client.destroy();
+  });
+});
+
 describe("questKitClient.getMissions", () => {
   const mission: Mission = {
     id: "m1",
@@ -605,6 +765,272 @@ describe("questKitClient.subscribe", () => {
   });
 });
 
+describe("questKitClient — request timeouts (TASK-005)", () => {
+  // Each test uses a tiny `timeoutMs` so the suite stays fast. The
+  // `pendingFetch` helper returns a never-resolving promise so the only
+  // thing that can settle the call is our timeout signal.
+  function pendingFetch(): {
+    fetchImpl: typeof fetch;
+    aborted: () => boolean;
+  } {
+    let aborted = false;
+    const fetchImpl = jest
+      .fn()
+      .mockImplementation((_url: string, init?: RequestInit) => {
+        return new Promise<Response>((_resolve, reject) => {
+          const signal = init?.signal;
+          if (signal === null || signal === undefined) {
+            // No signal — the test would hang. Fail loudly.
+            reject(new Error("test setup: expected an AbortSignal on fetch"));
+            return;
+          }
+          if (signal.aborted) {
+            aborted = true;
+            reject(
+              Object.assign(new Error("aborted"), {
+                name: "TimeoutError",
+              }),
+            );
+            return;
+          }
+          signal.addEventListener(
+            "abort",
+            () => {
+              aborted = true;
+              // Mimic what the platform fetch throws on a TimeoutError:
+              // DOMException("...", "TimeoutError"). We approximate that
+              // with a plain Error whose .name matches.
+              const err = new Error("The operation was aborted");
+              err.name = "TimeoutError";
+              reject(err);
+            },
+            { once: true },
+          );
+        });
+      });
+    return {
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      aborted: () => aborted,
+    };
+  }
+
+  it("rejects mintToken with code=timeout when fetch hangs past timeoutMs", async () => {
+    const { fetchImpl } = pendingFetch();
+    const client = new QuestKitClient({
+      baseUrl: "https://api.example",
+      appId: "app1",
+      getToken: () => makeFakeJwt("u"),
+      fetchImpl,
+      timeoutMs: 25,
+    });
+    const start = Date.now();
+    await expect(
+      client.mintToken({ appSecret: "s", userId: "u" }),
+    ).rejects.toMatchObject({ code: "timeout" });
+    // Sanity: the rejection must arrive within a few multiples of the
+    // configured timeout. 200 ms is generous on slow CI without making the
+    // assertion meaningless.
+    expect(Date.now() - start).toBeLessThan(200);
+    client.destroy();
+  });
+
+  it("rejects getMissions with code=timeout when fetch hangs", async () => {
+    const { fetchImpl } = pendingFetch();
+    const client = makeClient(fetchImpl, { timeoutMs: 20 });
+    await expect(client.getMissions()).rejects.toMatchObject({
+      code: "timeout",
+    });
+    client.destroy();
+  });
+
+  it("rejects getMission with code=timeout when fetch hangs", async () => {
+    const { fetchImpl } = pendingFetch();
+    const client = makeClient(fetchImpl, { timeoutMs: 20 });
+    await expect(client.getMission("m1")).rejects.toMatchObject({
+      code: "timeout",
+    });
+    client.destroy();
+  });
+
+  it("rejects claimMission with code=timeout when fetch hangs", async () => {
+    const { fetchImpl } = pendingFetch();
+    const client = makeClient(fetchImpl, { timeoutMs: 20 });
+    await expect(client.claimMission("m1")).rejects.toMatchObject({
+      code: "timeout",
+    });
+    client.destroy();
+  });
+
+  it("rejects getBalances with code=timeout when fetch hangs", async () => {
+    const { fetchImpl } = pendingFetch();
+    const client = makeClient(fetchImpl, { timeoutMs: 20 });
+    await expect(client.getBalances()).rejects.toMatchObject({
+      code: "timeout",
+    });
+    client.destroy();
+  });
+
+  it("rejects getBalance with code=timeout when fetch hangs", async () => {
+    const { fetchImpl } = pendingFetch();
+    const client = makeClient(fetchImpl, { timeoutMs: 20 });
+    await expect(client.getBalance("coin")).rejects.toMatchObject({
+      code: "timeout",
+    });
+    client.destroy();
+  });
+
+  it("rejects getCampaigns with code=timeout when fetch hangs", async () => {
+    const { fetchImpl } = pendingFetch();
+    const client = makeClient(fetchImpl, { timeoutMs: 20 });
+    await expect(client.getCampaigns()).rejects.toMatchObject({
+      code: "timeout",
+    });
+    client.destroy();
+  });
+
+  it("rejects getCampaign with code=timeout when fetch hangs", async () => {
+    const { fetchImpl } = pendingFetch();
+    const client = makeClient(fetchImpl, { timeoutMs: 20 });
+    await expect(client.getCampaign("c1")).rejects.toMatchObject({
+      code: "timeout",
+    });
+    client.destroy();
+  });
+
+  it("rejects getRecommendations with code=timeout when fetch hangs", async () => {
+    const { fetchImpl } = pendingFetch();
+    const client = makeClient(fetchImpl, { timeoutMs: 20 });
+    await expect(client.getRecommendations()).rejects.toMatchObject({
+      code: "timeout",
+    });
+    client.destroy();
+  });
+
+  it("queues (does not throw) when fireEvent's fetch hangs — the queue is the retry surface", async () => {
+    // fireEvent has its own try/catch that maps any network-level failure
+    // (timeout included) into a queued result. That's the intentional
+    // contract: the caller's `isFiring` flag clears via the resolved
+    // promise, and the event is durable in the queue for the background
+    // flush.
+    const { fetchImpl } = pendingFetch();
+    const client = makeClient(fetchImpl, { timeoutMs: 20 });
+    const result = await client.fireEvent({ name: "x", payload: {} });
+    expect(result.queued).toBe(true);
+    expect(result.accepted).toBe(false);
+    client.destroy();
+  });
+
+  it("error message names the configured timeoutMs so logs are diagnosable", async () => {
+    const { fetchImpl } = pendingFetch();
+    const client = makeClient(fetchImpl, { timeoutMs: 33 });
+    await expect(client.getBalances()).rejects.toMatchObject({
+      code: "timeout",
+      message: expect.stringContaining("33ms"),
+    });
+    client.destroy();
+  });
+
+  it("defaults to 10000ms when timeoutMs is not provided", async () => {
+    const { fetchImpl } = pendingFetch();
+    const client = new QuestKitClient({
+      baseUrl: "https://api.example",
+      appId: "app1",
+      getToken: () => makeFakeJwt("u"),
+      fetchImpl,
+    });
+    // We can't wait the full 10s in CI — instead, manually abort via the
+    // signal the SDK passed to fetch and confirm it took ~10s worth of
+    // signal-aliveness. Simpler: just inspect that the SDK does NOT throw
+    // immediately; the test wins if the call is still pending after a
+    // short delay.
+    const promise = client.getBalances();
+    const winner = await Promise.race([
+      promise.then(
+        () => "resolved",
+        () => "rejected",
+      ),
+      new Promise((res) => setTimeout(() => res("pending"), 50)),
+    ]);
+    expect(winner).toBe("pending");
+    // Clean up: the request will eventually time out at 10s — destroy()
+    // doesn't cancel the in-flight fetch, so we swallow the eventual
+    // rejection to avoid an unhandled-promise warning. Setting a no-op
+    // .catch is enough.
+    promise.catch(() => {
+      /* expected — will reject with timeout after 10s */
+    });
+    client.destroy();
+  });
+
+  it("honours timeoutMs: 0 as 'no timeout' for tests that drive aborts by hand", async () => {
+    // With timeoutMs=0, request() short-circuits and passes the caller's
+    // init through untouched — useful for tests that want to verify the
+    // mock fetch sees exactly what the SDK sent without a synthetic signal.
+    const { fetchImpl, calls } = mockFetch([jsonResponse({ balances: [] })]);
+    const client = makeClient(fetchImpl, { timeoutMs: 0 });
+    await client.getBalances();
+    const init = calls[0]?.init;
+    // No signal injected — we passed no signal, the SDK kept its hands off.
+    expect(init?.signal).toBeUndefined();
+    client.destroy();
+  });
+
+  it("re-throws non-timeout AbortErrors verbatim (caller-driven aborts pass through)", async () => {
+    // Verify isTimeoutAbort discriminates: a caller-provided AbortController
+    // that aborts BEFORE our timeout fires should bubble up as the original
+    // error, not be remapped to QuestKitError(timeout). We exercise this by
+    // making the fetch reject with an AbortError that DIDN'T come from our
+    // signal — the timeout signal never fires.
+    const fakeAbort = new Error("caller cancelled");
+    fakeAbort.name = "AbortError";
+    const fetchImpl = jest.fn().mockRejectedValue(fakeAbort);
+    const client = makeClient(fetchImpl as unknown as typeof fetch, {
+      timeoutMs: 10000,
+    });
+    // Should reject with the original error shape, not QuestKitError.
+    await expect(client.getBalances()).rejects.toBe(fakeAbort);
+    client.destroy();
+  });
+
+  it("maps a real AbortSignal.timeout-driven failure to QuestKitError(timeout) end-to-end", async () => {
+    // Sanity: skip the mock and let the SDK pair its real AbortSignal.timeout
+    // with a fetch that genuinely hangs until aborted. Validates the chain
+    // AbortSignal.timeout → DOMException("TimeoutError") → isTimeoutAbort →
+    // QuestKitError(timeout) works on the actual runtime (not just against
+    // our synthetic mock).
+    const fetchImpl = (url: string, init?: RequestInit): Promise<Response> => {
+      // Bind URL to keep ESLint quiet about unused param.
+      void url;
+      return new Promise<Response>((_resolve, reject) => {
+        const signal = init?.signal;
+        if (signal === undefined || signal === null) {
+          reject(new Error("no signal provided"));
+          return;
+        }
+        signal.addEventListener(
+          "abort",
+          () => {
+            // Reproduce DOMException("...", "TimeoutError") closely enough
+            // for isTimeoutAbort to match.
+            const err = new Error("aborted");
+            err.name = "TimeoutError";
+            reject(err);
+          },
+          { once: true },
+        );
+      });
+    };
+    const client = makeClient(fetchImpl as unknown as typeof fetch, {
+      timeoutMs: 15,
+    });
+    await expect(client.getBalances()).rejects.toBeInstanceOf(QuestKitError);
+    await expect(client.getBalances()).rejects.toMatchObject({
+      code: "timeout",
+    });
+    client.destroy();
+  });
+});
+
 describe("questKitClient — error mapping", () => {
   it("maps 403 to forbidden", async () => {
     const { fetchImpl } = mockFetch([
@@ -638,6 +1064,185 @@ describe("questKitClient — error mapping", () => {
     await expect(client.getBalances()).rejects.toMatchObject({
       code: "server_error",
     });
+    client.destroy();
+  });
+});
+
+describe("questKitClient — authedFetch shared timeout budget (TASK-005 follow-up)", () => {
+  it("honours timeoutMs as a SHARED budget across 401-retry — not 2× timeoutMs", async () => {
+    // Regression test for the "doubled budget" bug. With timeoutMs=100:
+    //   - Attempt 1 → 401 after ~50ms (consumes half the budget)
+    //   - Token refresh (cheap)
+    //   - Attempt 2 → hangs forever
+    //
+    // The contract says the WHOLE chain must reject within ~timeoutMs. A
+    // broken impl would create a fresh AbortSignal.timeout(100) for attempt
+    // 2 and reject around ~150ms total. We assert <150ms to catch that.
+    let call = 0;
+    const fetchImpl = jest
+      .fn()
+      .mockImplementation((_url: string, init?: RequestInit) => {
+        call += 1;
+        const signal = init?.signal;
+        if (call === 1) {
+          // Attempt 1: respond 401 quickly so attempt 2 can begin under the
+          // SAME budget.
+          return new Promise<Response>((resolve, reject) => {
+            const timer = setTimeout(() => {
+              resolve(jsonResponse({ error: "unauthorized" }, 401));
+            }, 50);
+            if (signal && !signal.aborted) {
+              signal.addEventListener(
+                "abort",
+                () => {
+                  clearTimeout(timer);
+                  const e = new Error("aborted-during-attempt-1");
+                  e.name = "TimeoutError";
+                  reject(e);
+                },
+                { once: true },
+              );
+            }
+          });
+        }
+        // Attempt 2: hang forever; only the SHARED abort signal can settle us.
+        return new Promise<Response>((_resolve, reject) => {
+          if (signal === undefined || signal === null) {
+            reject(
+              new Error("test setup: expected an AbortSignal on attempt 2"),
+            );
+            return;
+          }
+          if (signal.aborted) {
+            const e = new Error("already-aborted");
+            e.name = "TimeoutError";
+            reject(e);
+            return;
+          }
+          signal.addEventListener(
+            "abort",
+            () => {
+              const e = new Error("aborted-during-attempt-2");
+              e.name = "TimeoutError";
+              reject(e);
+            },
+            { once: true },
+          );
+        });
+      });
+
+    const client = makeClient(fetchImpl as unknown as typeof fetch, {
+      timeoutMs: 100,
+    });
+    const start = Date.now();
+    await expect(client.getBalances()).rejects.toMatchObject({
+      code: "timeout",
+    });
+    const elapsed = Date.now() - start;
+    // Shared budget: must reject within ~100ms (+ a small CI tolerance).
+    // A doubled budget would land near 150ms+ — we'd flag that.
+    expect(elapsed).toBeLessThan(150);
+    // And both attempts actually ran (the bug we're testing only manifests
+    // when the second attempt is reached).
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    client.destroy();
+  });
+
+  it("does not start attempt 2 if the shared budget expired during attempt 1 + refresh", async () => {
+    // Variant: attempt 1 returns 401 just as the timeout fires. The
+    // pre-attempt-2 check should short-circuit instead of spinning up a
+    // second fetch with a fresh budget.
+    let call = 0;
+    const fetchImpl = jest.fn().mockImplementation((_url: string) => {
+      call += 1;
+      // Attempt 1 returns 401 right at the edge of the budget.
+      return new Promise<Response>((resolve) => {
+        setTimeout(() => {
+          resolve(jsonResponse({ error: "unauthorized" }, 401));
+        }, 40);
+      });
+    });
+
+    // Slow getToken so the shared budget expires DURING the refresh, before
+    // attempt 2 fires.
+    const slowGetToken = (): Promise<string> =>
+      new Promise<string>((resolve) => {
+        setTimeout(() => resolve(makeFakeJwt("u")), 80);
+      });
+
+    const client = new QuestKitClient({
+      baseUrl: "https://api.example",
+      appId: "app1",
+      getToken: slowGetToken,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      storage: new MemoryStorage(),
+      timeoutMs: 100,
+    });
+    await expect(client.getBalances()).rejects.toMatchObject({
+      code: "timeout",
+    });
+    // Attempt 2 must never have started — the budget was already gone.
+    expect(call).toBe(1);
+    client.destroy();
+  });
+});
+
+describe("questKitClient — fireEvent error discrimination (TASK-005 follow-up)", () => {
+  it("throws (does NOT queue) when getTokenFn rejects with QuestKitError(config_error)", async () => {
+    // The original bare-catch silently queued config errors — a
+    // programmer-visible bug got hidden behind a queued: true result. The
+    // tightened catch must rethrow.
+    const fetchImpl = jest.fn(); // should never be called
+    const client = new QuestKitClient({
+      baseUrl: "https://api.example",
+      appId: "app1",
+      getToken: () => {
+        throw new QuestKitError("invalid token", "config_error");
+      },
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      storage: new MemoryStorage(),
+    });
+    await expect(
+      client.fireEvent({ name: "x", payload: {} }),
+    ).rejects.toMatchObject({
+      code: "config_error",
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(client.queueDepth()).toBe(0);
+    client.destroy();
+  });
+
+  it("throws (does NOT queue) when response body is not valid JSON", async () => {
+    // The server returned a 200 with garbage — that's a programmer-visible
+    // contract violation (server bug, or wrong endpoint pointed at). The
+    // SDK must surface it instead of queueing forever.
+    //
+    // Note: cross-realm `instanceof SyntaxError` is unreliable in jsdom
+    // (Response.json constructs the error in its own realm). Match by
+    // .name instead — that's what consumers would do anyway.
+    const fetchImpl = jest
+      .fn()
+      .mockResolvedValue(new Response("nope", { status: 200 }));
+    const client = makeClient(fetchImpl as unknown as typeof fetch);
+    await expect(
+      client.fireEvent({ name: "x", payload: {} }),
+    ).rejects.toMatchObject({ name: "SyntaxError" });
+    // The malformed-body case is NOT retryable — must not enqueue.
+    expect(client.queueDepth()).toBe(0);
+    client.destroy();
+  });
+
+  it("still queues genuine network-level failures (TypeError from fetch)", async () => {
+    // Regression guard: the new discriminator must still treat real network
+    // failures (DNS, disconnect — surfaced as TypeError in WHATWG fetch) as
+    // retryable. Without this assertion, an over-tight discriminator would
+    // turn the offline case into a hard throw and break the queue contract.
+    const networkError = new TypeError("Failed to fetch");
+    const fetchImpl = jest.fn().mockRejectedValue(networkError);
+    const client = makeClient(fetchImpl as unknown as typeof fetch);
+    const result = await client.fireEvent({ name: "x", payload: {} });
+    expect(result.queued).toBe(true);
+    expect(result.accepted).toBe(false);
     client.destroy();
   });
 });

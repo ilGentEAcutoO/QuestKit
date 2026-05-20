@@ -1,0 +1,275 @@
+# Phase 8 / TASK-007 — Reproducible CI deploy.
+#
+# Trigger model: workflow_run after CI succeeds on `main`. Rationale:
+#
+#   (a) workflow_run keeps deploy a separate file from ci.yml. Reading the
+#       deploy log in isolation is faster than scrolling past the lint/test/
+#       sonar/newman jobs.
+#   (b) Adding a deploy job INTO ci.yml would couple two concerns: contract
+#       (CI) and side-effects (deploy). The CI workflow already runs on PRs;
+#       PRs must NEVER deploy.
+#   (c) workflow_dispatch is also wired so a maintainer can re-deploy without
+#       pushing a new commit (e.g. after rotating a secret).
+#
+# workflow_run runs in the base-repo context, so GitHub secrets (including
+# CLOUDFLARE_API_TOKEN) are available — unlike pull_request_target from forks.
+#
+# Order: D1 migrations → api → consumer → relay → demo → docs → playground →
+# health-check. The api worker MUST deploy before consumer (consumer binds to
+# api's ApiService entrypoint) and before demo (demo's /api/token proxy hits
+# api/v1/auth/token). Static-asset workers (docs, playground) go last because
+# they're broken less by ordering errors.
+#
+# Newman contract tests stay in ci.yml. They run against
+# https://api.questkit.jairukchan.com on every push to main, which means there
+# is a brief window where Newman tests the OLD api worker while this deploy
+# is still in flight. This is acceptable: Newman is contract-stability
+# regression (does the API still answer the same way?), and the post-deploy
+# /v1/health check below is the per-deploy success signal.
+
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      skip_migrations:
+        description: "Skip D1 migrations (use only if migrations already applied)"
+        type: boolean
+        default: false
+
+# Don't run two deploys in parallel — Cloudflare's worker upload API will
+# reject a second concurrent deploy of the same worker name with a 409.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  # SORNKan Co., Ltd. (the account that owns api.questkit.jairukchan.com etc.).
+  # The account ID isn't a secret — it's printed in every `wrangler deploy`
+  # log and in dashboard URLs.
+  CLOUDFLARE_ACCOUNT_ID: a24ce30584273b42333051f1cdec48e2
+
+jobs:
+  deploy:
+    name: Build, migrate, deploy all 6 workers
+    # Gate workflow_run on the CI workflow having ACTUALLY succeeded; the
+    # workflow_run trigger fires on every CI completion regardless of outcome,
+    # so we must check `conclusion == "success"` explicitly. workflow_dispatch
+    # has no `workflow_run` context, so allow it through unconditionally.
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          # On workflow_run the default checkout is the workflow file itself
+          # on the default branch; pin to the commit that CI ran against so
+          # we deploy exactly the artifact CI validated.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.27.0
+          run_install: false
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate wrangler types
+        run: |
+          pnpm --filter @questkit/worker-api cf-typegen
+          pnpm --filter @questkit/worker-webhook-relay cf-typegen
+          pnpm --filter @questkit/worker-webhook-consumer cf-typegen
+
+      # Build all artifacts up front so a failure surfaces before any
+      # production worker is uploaded. Docusaurus + Vite + the playground's
+      # copy-embed step all need to run on the CI runner.
+      - name: Build static-asset workers
+        run: |
+          pnpm --filter @questkit/demo build
+          pnpm --filter @questkit/docs build
+          pnpm --filter @questkit/playground build
+
+      # ─── D1 migrations ────────────────────────────────────────────────
+      # `wrangler d1 migrations apply` is idempotent: it reads the
+      # d1_migrations table and only applies rows not yet present. Safe to
+      # run on every deploy. Must happen BEFORE the api worker upload so the
+      # worker's code never references a column the database doesn't have.
+      - name: Apply D1 migrations
+        if: ${{ github.event_name != 'workflow_dispatch' || !inputs.skip_migrations }}
+        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ env.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: workers/api
+          command: d1 migrations apply questkit-d1-main --remote --env production
+
+      # ─── Worker 1/6: api ──────────────────────────────────────────────
+      # Must go first: webhook-consumer binds to its ApiService entrypoint
+      # (service binding) and demo's /api/token proxy hits its
+      # /v1/auth/token route.
+      - name: Deploy questkit-worker-api
+        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ env.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: workers/api
+          command: deploy --env production
+          secrets: |
+            JWT_SECRET
+            APP_SECRET
+            WEBHOOK_HMAC_SECRET
+        env:
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          APP_SECRET: ${{ secrets.APP_SECRET }}
+          WEBHOOK_HMAC_SECRET: ${{ secrets.WEBHOOK_HMAC_SECRET }}
+
+      # ─── Worker 2/6: webhook-consumer ─────────────────────────────────
+      # Service-binds to api via WorkerEntrypoint RPC. Order matters; do not
+      # run in parallel with api deploy.
+      - name: Deploy questkit-worker-webhook-consumer
+        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ env.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: workers/webhook-consumer
+          command: deploy --env production
+
+      # ─── Worker 3/6: webhook-relay ────────────────────────────────────
+      # Public-facing HMAC verifier; binds to the same queue as the consumer.
+      # Needs the WEBHOOK_HMAC_SECRET to verify inbound payloads.
+      - name: Deploy questkit-worker-webhook-relay
+        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ env.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: workers/webhook-relay
+          command: deploy --env production
+          secrets: |
+            WEBHOOK_HMAC_SECRET
+        env:
+          WEBHOOK_HMAC_SECRET: ${{ secrets.WEBHOOK_HMAC_SECRET }}
+
+      # ─── Worker 4/6: demo (apex) ──────────────────────────────────────
+      # SPA + /api/token proxy. The proxy POSTs to api.questkit.jairukchan.com
+      # so the api worker must already be live (it is — Worker 1/6 above).
+      - name: Deploy questkit-worker-demo
+        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ env.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: apps/demo
+          # `vite build` already ran in the Build step above; the action will
+          # just upload ./dist via the assets binding.
+          command: deploy --env production
+          secrets: |
+            APP_SECRET
+        env:
+          APP_SECRET: ${{ secrets.APP_SECRET }}
+
+      # ─── Worker 5/6: docs ─────────────────────────────────────────────
+      - name: Deploy questkit-worker-docs
+        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ env.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: apps/docs
+          command: deploy --env production
+
+      # ─── Worker 6/6: playground ───────────────────────────────────────
+      - name: Deploy questkit-worker-play
+        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ env.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: apps/playground
+          command: deploy --env production
+
+      # ─── Post-deploy smoke ────────────────────────────────────────────
+      # Hits the api worker's /v1/health and the apex demo. Both must return
+      # 200 within 30s. Cloudflare's edge propagation is usually <10s but TLS
+      # warm-up after a fresh deploy can spike — we retry 3× with 10s gaps.
+      - name: Smoke-test deployed endpoints
+        run: |
+          set -euo pipefail
+          smoke() {
+            local url="$1"
+            local label="$2"
+            local attempts=0
+            local max=3
+            local code=0
+            while [ "$attempts" -lt "$max" ]; do
+              attempts=$((attempts + 1))
+              code=$(curl -sS -o /tmp/smoke-body -w "%{http_code}" "$url" || echo "000")
+              if [ "$code" = "200" ]; then
+                echo "[$label] OK ($code) on attempt $attempts"
+                head -c 400 /tmp/smoke-body || true
+                echo
+                return 0
+              fi
+              echo "[$label] attempt $attempts → $code (body follows)"
+              head -c 200 /tmp/smoke-body || true
+              echo
+              if [ "$attempts" -lt "$max" ]; then
+                sleep 10
+              fi
+            done
+            echo "::error::$label failed after $max attempts (last code: $code)"
+            return 1
+          }
+          smoke https://api.questkit.jairukchan.com/v1/health "api /v1/health"
+          smoke https://questkit.jairukchan.com/             "demo apex"
+
+      # ─── Post-deploy E2E gate (Phase 8 / TASK-009) ───────────────────
+      # Runs the full Playwright button-coverage suite against the live
+      # apex (https://questkit.jairukchan.com). Any test failure FAILS
+      # this deploy job, preventing a green-but-broken deploy. The pnpm
+      # install + browser install + suite run together typically take
+      # 2–3 minutes; we cap at 15 to absorb cold-cache CI variance.
+      #
+      # Browsers: chromium only (the playwright config also includes
+      # `mobile-chrome`, also chromium-based; both ship with the single
+      # browser install). `--with-deps` pulls the OS shared libraries the
+      # ubuntu-latest runner needs to launch Chromium headless.
+      - name: Install Playwright browsers
+        run: pnpm --filter @questkit/demo exec playwright install chromium --with-deps
+        timeout-minutes: 5
+
+      - name: Run E2E suite against live deploy
+        run: pnpm --filter @questkit/demo e2e:prod
+        timeout-minutes: 15
+        env:
+          # Forwarded to playwright.config.ts. The config switches baseURL
+          # to https://questkit.jairukchan.com and skips the local vite
+          # webServer block (no dev server in CI here).
+          E2E_TARGET: prod
+          CI: "true"
+
+      # On failure, upload the Playwright HTML report so a maintainer can
+      # download it from the workflow run page and inspect screenshots,
+      # videos, and traces (videos + traces are retained on failure per
+      # playwright.config.ts).
+      - name: Upload Playwright HTML report (on failure)
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: playwright-report
+          path: apps/demo/playwright-report/
+          retention-days: 7
+          if-no-files-found: ignore

@@ -135,6 +135,55 @@ describe("useEvent", () => {
     expect(result.current.error?.code).toBe("network_error");
   });
 
+  it("clears isFiring when fireEvent rejects with a timeout (TASK-005)", async () => {
+    // Defense-in-depth check: a hung API used to leave `isFiring` stuck at
+    // true ("Logging…" button). With the SDK's timeout, the rejected
+    // promise must drive `isFiring` back to false and surface the
+    // timeout-coded QuestKitError in `error`.
+    const timeoutErr = new QuestKitError(
+      "request timed out after 50ms",
+      "timeout",
+    );
+    const client = makeFakeClient({
+      fireEvent: jest.fn().mockRejectedValue(timeoutErr),
+    });
+    const { result } = renderHook(() => useEvent(), {
+      wrapper: wrapperWith(client),
+    });
+    await act(async () => {
+      await expect(
+        result.current.fireEvent({ name: "x", payload: {} }),
+      ).rejects.toMatchObject({ code: "timeout" });
+    });
+    expect(result.current.isFiring).toBe(false);
+    expect(result.current.error?.code).toBe("timeout");
+  });
+
+  it("clears isFiring when fireEvent resolves with queued=true (timeout-driven queue path)", async () => {
+    // The QuestKitClient's fireEvent swallows timeouts and returns
+    // `queued: true` — that's the intentional contract (events are durable
+    // in the SDK queue). Even so, useEvent.isFiring must clear so the UI
+    // can re-enable the button.
+    const queuedResult: FireEventResult = {
+      accepted: false,
+      eventId: null,
+      missionsUpdated: [],
+      queued: true,
+    };
+    const client = makeFakeClient({
+      fireEvent: jest.fn().mockResolvedValue(queuedResult),
+    });
+    const { result } = renderHook(() => useEvent(), {
+      wrapper: wrapperWith(client),
+    });
+    await act(async () => {
+      const r = await result.current.fireEvent({ name: "x", payload: {} });
+      expect(r.queued).toBe(true);
+    });
+    expect(result.current.isFiring).toBe(false);
+    expect(result.current.error).toBeNull();
+  });
+
   it("does not throw if the promise resolves after unmount", async () => {
     let resolveOk: (v: FireEventResult) => void = () => {};
     const pending = new Promise<FireEventResult>((res) => {

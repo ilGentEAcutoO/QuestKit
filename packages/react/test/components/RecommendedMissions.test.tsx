@@ -9,6 +9,10 @@
  *    as a subtle caption above the cards.
  *  - `cached: true` → "Refreshes hourly" hint visible.
  *  - `cached: false` → hint absent.
+ *  - `fallback: true` (Phase 8 / v0.1.4) → graceful empty-state copy ("AI
+ *    picks unavailable right now") with NO raw error code. The component
+ *    must NOT render the words `ai_response_malformed` or any 502/503
+ *    error code regardless of payload contents.
  */
 import type { Mission, MissionProgress } from "@questkit/types";
 import type { ReactElement, ReactNode } from "react";
@@ -207,5 +211,105 @@ describe("recommendedMissions", () => {
       expect(screen.getByText(/fresh\./i)).toBeInTheDocument(),
     );
     expect(screen.queryByText(/refreshes hourly/i)).not.toBeInTheDocument();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Phase 8 / v0.1.4 TASK-002 — fallback empty-state when AI is unavailable.
+  // ---------------------------------------------------------------------------
+
+  it("renders a tasteful empty-state when fallback:true", async () => {
+    const client = makeFakeClient({
+      getRecommendations: jest.fn().mockResolvedValue({
+        missionIds: [],
+        reason: "AI picks unavailable right now.",
+        cached: false,
+        count: 0,
+        fallback: true,
+      }),
+      getUserId: jest.fn().mockResolvedValue("u1"),
+    });
+    const Wrapper = wrapperWith(client);
+    render(
+      <Wrapper>
+        <RecommendedMissions />
+      </Wrapper>,
+    );
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(/ai picks unavailable right now/i),
+      ).toBeInTheDocument(),
+    );
+    // The fallback UX must use status semantics, NOT alert — this is a
+    // tasteful empty-state, not a red error.
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toBeInTheDocument();
+  });
+
+  it("does NOT leak raw error codes like 'ai_response_malformed' in fallback state", async () => {
+    const client = makeFakeClient({
+      getRecommendations: jest.fn().mockResolvedValue({
+        // Defensive: even if the server somehow leaks an error code into the
+        // reason field, the component must not display it. We use a sentinel
+        // that resembles the legacy 502 body and assert it never reaches DOM.
+        missionIds: [],
+        reason: "ai_response_malformed",
+        cached: false,
+        count: 0,
+        fallback: true,
+      }),
+      getUserId: jest.fn().mockResolvedValue("u1"),
+    });
+    const Wrapper = wrapperWith(client);
+    render(
+      <Wrapper>
+        <RecommendedMissions />
+      </Wrapper>,
+    );
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(/ai picks unavailable right now/i),
+      ).toBeInTheDocument(),
+    );
+    expect(
+      screen.queryByText(/ai_response_malformed/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does NOT render mission cards when fallback:true (even if missionIds is non-empty)", async () => {
+    // Defensive contract: the only signal that matters is `fallback`. Even if
+    // some odd server build returned ids alongside fallback, the UI must not
+    // render them — the AI was deemed unavailable, so don't surface stale data.
+    const m1 = mkMission("mis_a", "Should Not Appear");
+    const client = makeFakeClient({
+      getRecommendations: jest.fn().mockResolvedValue({
+        missionIds: ["mis_a"],
+        reason: "AI picks unavailable right now.",
+        cached: false,
+        count: 1,
+        fallback: true,
+      }),
+      getUserId: jest.fn().mockResolvedValue("u1"),
+      getMission: jest.fn().mockResolvedValue({
+        mission: m1,
+        progress: mkProgress(m1.id),
+      }),
+    });
+    const Wrapper = wrapperWith(client);
+    render(
+      <Wrapper>
+        <RecommendedMissions />
+      </Wrapper>,
+    );
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(/ai picks unavailable right now/i),
+      ).toBeInTheDocument(),
+    );
+    expect(
+      screen.queryByRole("heading", { name: /should not appear/i }),
+    ).not.toBeInTheDocument();
   });
 });

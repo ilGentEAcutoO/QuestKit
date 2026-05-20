@@ -10,7 +10,14 @@
  */
 import type { Mission, MissionProgress } from "@questkit/types";
 import type { ReactElement, ReactNode } from "react";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { QuestKitError } from "@questkit/core";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 
 import { MissionCard } from "../../src/components/MissionCard";
 import { QuestKitProvider } from "../../src/provider";
@@ -243,6 +250,52 @@ describe("missionCard", () => {
     expect(img?.getAttribute("aria-hidden")).toBe("true");
   });
 
+  it("clears the 'Claiming…' state after onClaim rejects with a timeout (TASK-005)", async () => {
+    // The bug: if onClaim hangs forever (no timeout), the button label
+    // stays "Claiming…" and the card is stuck. With SDK-level timeouts,
+    // onClaim either resolves or rejects within ~10s — either way the
+    // local `isClaiming` flag must clear via the finally block. The click
+    // handler's .catch keeps the rejection from surfacing as an unhandled
+    // rejection in the host page.
+    const timeoutErr = new QuestKitError(
+      "request timed out after 50ms",
+      "timeout",
+    );
+    const client = makeFakeClient({
+      fireEvent: jest.fn().mockResolvedValue({
+        accepted: true,
+        eventId: "e",
+        missionsUpdated: [],
+      }),
+    });
+    const Wrapper = wrapperWith(client);
+    const onClaim = jest.fn().mockRejectedValue(timeoutErr);
+    render(
+      <Wrapper>
+        <MissionCard
+          mission={mission}
+          progress={progressWith("completed", { currentCount: 5, progress: 1 })}
+          onClaim={onClaim}
+        />
+      </Wrapper>,
+    );
+    const btn = screen.getByRole("button", { name: /claim reward/i });
+    await act(async () => {
+      fireEvent.click(btn);
+    });
+    // After the rejected onClaim, the finally block must reset isClaiming
+    // so the button returns to the "Claim" affordance — NOT stuck on
+    // "Claiming…". The `name` query asserts both the aria-label and the
+    // visible label flipped back.
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: /claim reward/i }),
+      ).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Claiming…")).toBeNull();
+    expect(onClaim).toHaveBeenCalledWith("m1");
+  });
+
   it("does not render an icon element when iconUrl is omitted or empty", () => {
     const client = makeFakeClient();
     const Wrapper = wrapperWith(client);
@@ -262,5 +315,133 @@ describe("missionCard", () => {
       </Wrapper>,
     );
     expect(c2.querySelector(".qk-mission-card-icon")).toBeNull();
+  });
+
+  it("clamps the displayed counter when currentCount overshoots targetCount", () => {
+    const client = makeFakeClient();
+    const Wrapper = wrapperWith(client);
+    const { container } = render(
+      <Wrapper>
+        <MissionCard
+          mission={mission}
+          progress={progressWith("active", {
+            currentCount: 19,
+            targetCount: 5,
+            progress: 1,
+          })}
+        />
+      </Wrapper>,
+    );
+    const text = container.querySelector(
+      ".qk-mission-card-progress-text",
+    ) as HTMLElement;
+    expect(text).not.toBeNull();
+    // Show the clamped "5 / 5" — never the raw "19 / 5".
+    expect(text.textContent).toContain("5 / 5");
+    expect(text.textContent).not.toContain("19 / 5");
+    // Percent badge must also clamp at 100% even when `progress` overshoots.
+    expect(text.textContent).toContain("100%");
+  });
+
+  it("clamps the ProgressBar visual fill at 100% when overshot", () => {
+    const client = makeFakeClient();
+    const Wrapper = wrapperWith(client);
+    const { container } = render(
+      <Wrapper>
+        <MissionCard
+          mission={mission}
+          progress={progressWith("active", {
+            currentCount: 19,
+            targetCount: 5,
+            progress: 3.8,
+          })}
+        />
+      </Wrapper>,
+    );
+    const fill = container.querySelector(".qk-progressbar-fill") as HTMLElement;
+    expect(fill).not.toBeNull();
+    // ProgressBar already clamps internally — guard against regression.
+    expect(fill.style.width).toBe("100%");
+  });
+
+  it("clamps the ProgressBar aria-label so screen readers don't announce overshoot", () => {
+    const client = makeFakeClient();
+    const Wrapper = wrapperWith(client);
+    render(
+      <Wrapper>
+        <MissionCard
+          mission={mission}
+          progress={progressWith("active", {
+            currentCount: 19,
+            targetCount: 5,
+            progress: 1,
+          })}
+        />
+      </Wrapper>,
+    );
+    // The progressbar's aria-label should read "5 of 5", not "19 of 5".
+    const bar = screen.getByRole("progressbar");
+    expect(bar.getAttribute("aria-label")).toBe("Progress: 5 of 5");
+  });
+
+  it("renders a 'claimed today' hint when status is claimed", () => {
+    const client = makeFakeClient();
+    const Wrapper = wrapperWith(client);
+    render(
+      <Wrapper>
+        <MissionCard
+          mission={mission}
+          progress={progressWith("claimed", {
+            currentCount: 5,
+            targetCount: 5,
+            progress: 1,
+          })}
+        />
+      </Wrapper>,
+    );
+    // Hint exists as its own element (so screen readers announce it cleanly).
+    expect(screen.getByText(/claimed today/i)).toBeInTheDocument();
+  });
+
+  it("dims the progress text when status is claimed", () => {
+    const client = makeFakeClient();
+    const Wrapper = wrapperWith(client);
+    const { container } = render(
+      <Wrapper>
+        <MissionCard
+          mission={mission}
+          progress={progressWith("claimed", {
+            currentCount: 5,
+            targetCount: 5,
+            progress: 1,
+          })}
+        />
+      </Wrapper>,
+    );
+    const text = container.querySelector(
+      ".qk-mission-card-progress-text",
+    ) as HTMLElement;
+    expect(text).not.toBeNull();
+    // Dimming = opacity below the default 0.7 used for non-claimed states.
+    const opacity = Number.parseFloat(text.style.opacity);
+    expect(opacity).toBeLessThan(0.7);
+  });
+
+  it("does not render the claimed hint when status is not claimed", () => {
+    const client = makeFakeClient();
+    const Wrapper = wrapperWith(client);
+    render(
+      <Wrapper>
+        <MissionCard
+          mission={mission}
+          progress={progressWith("completed", {
+            currentCount: 5,
+            targetCount: 5,
+            progress: 1,
+          })}
+        />
+      </Wrapper>,
+    );
+    expect(screen.queryByText(/claimed today/i)).toBeNull();
   });
 });

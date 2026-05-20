@@ -34,6 +34,15 @@ interface MintRequest {
 
 const UPSTREAM_AUTH_URL = "https://api.questkit.jairukchan.com/v1/auth/token";
 const APP_ID = "demo";
+/**
+ * Fail-fast deadline for the upstream `/v1/auth/token` hop (TASK-005,
+ * v0.1.4). Intentionally tighter than the browser's 10s budget for the
+ * `/api/token` round trip — that way the demo worker surfaces a
+ * `upstream_unreachable` 502 to the browser before the browser's own
+ * timeout fires, giving the user a clear "auth upstream is sad" signal
+ * instead of a generic browser-side timeout.
+ */
+const UPSTREAM_TIMEOUT_MS = 8_000;
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -65,7 +74,22 @@ app.post("/api/token", async (c) => {
     upstream = await fetch(UPSTREAM_AUTH_URL, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ appId: APP_ID, userId, appSecret }),
+      // Phase 8 / TASK-003: the demo proxy is the ONLY caller that should
+      // request `kind: "demo"` — upstream stamps it on the JWT, and the
+      // `/v1/demo/reset` route gates the dangerous data-wipe on its
+      // presence. Real customer apps that POST `/v1/auth/token` directly
+      // omit `kind` and therefore cannot trip the reset.
+      body: JSON.stringify({
+        appId: APP_ID,
+        userId,
+        appSecret,
+        kind: "demo",
+      }),
+      // Defense-in-depth (TASK-005): bail out before the Workers Runtime
+      // request budget runs out. A timeout here surfaces the same
+      // `upstream_unreachable` shape as a network-level failure, so the
+      // browser path treats them identically.
+      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
     });
   } catch {
     return c.json({ error: "upstream_unreachable" }, 502);

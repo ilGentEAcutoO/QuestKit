@@ -291,7 +291,7 @@ Wait roughly 150 seconds for the certificate, then verify:
 
 ```bash
 curl https://api.yourdomain.com/v1/health
-# → {"ok":true,"version":"0.1.0","commit":"<sha>"}
+# → {"ok":true,"version":"0.1.4","commit":"<sha>"}
 ```
 
 If you don't own a domain (or the zone isn't on this Cloudflare account),
@@ -317,7 +317,7 @@ curl https://api.yourdomain.com/v1/health
 A healthy response:
 
 ```json
-{ "ok": true, "version": "0.1.0", "commit": "<sha or dev>" }
+{ "ok": true, "version": "0.1.4", "commit": "<sha or dev>" }
 ```
 
 If `/v1/health` returns 200, every binding wired correctly — D1, KV, R2,

@@ -128,6 +128,55 @@ describe("useRecommendations", () => {
     expect(getRecs).toHaveBeenCalledTimes(1);
   });
 
+  it("does NOT cache fallback responses — next mount retries the server (Phase 8 TASK-002 follow-up)", async () => {
+    // The server intentionally bypasses KV cache for fallback responses so the
+    // next call retries the AI. The hook MUST mirror that: writing the
+    // fallback into its 5-minute in-memory cache would trap users on a stale
+    // empty-state long after the AI recovers. See useRecommendations.ts.
+    const fallbackRecs: RecommendationsResult = {
+      missionIds: [],
+      reason: "AI picks unavailable right now.",
+      cached: false,
+      count: 0,
+      fallback: true,
+    };
+    const successRecs: RecommendationsResult = {
+      ...sampleRecs,
+      missionIds: ["m1", "m2"],
+      count: 2,
+    };
+    const getRecs = jest
+      .fn()
+      .mockResolvedValueOnce(fallbackRecs)
+      .mockResolvedValueOnce(successRecs)
+      .mockResolvedValueOnce(successRecs);
+    const client = makeFakeClient({
+      getRecommendations: getRecs,
+      getUserId: jest.fn().mockResolvedValue("u1"),
+    });
+
+    const wrapper = wrapperWith(client);
+
+    // First mount — receives fallback.
+    const r1 = renderHook(() => useRecommendations(), { wrapper });
+    await waitFor(() => expect(r1.result.current.isSuccess).toBe(true));
+    expect(r1.result.current.data).toEqual(fallbackRecs);
+    expect(getRecs).toHaveBeenCalledTimes(1);
+
+    // Second mount — fallback was NOT cached, so the hook MUST refetch (cache
+    // miss). This time the AI is back and we get a real recommendation.
+    const r2 = renderHook(() => useRecommendations(), { wrapper });
+    await waitFor(() => expect(r2.result.current.isSuccess).toBe(true));
+    expect(r2.result.current.data).toEqual(successRecs);
+    expect(getRecs).toHaveBeenCalledTimes(2);
+
+    // Third mount — happy-path result IS cached, so no further client call.
+    const r3 = renderHook(() => useRecommendations(), { wrapper });
+    await waitFor(() => expect(r3.result.current.isSuccess).toBe(true));
+    expect(r3.result.current.data).toEqual(successRecs);
+    expect(getRecs).toHaveBeenCalledTimes(2);
+  });
+
   it("does NOT mix data across userIds (cache is per-user)", async () => {
     const recsForU1: RecommendationsResult = {
       ...sampleRecs,

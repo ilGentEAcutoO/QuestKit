@@ -27,11 +27,29 @@
       "pattern": "questkit.jairukchan.com",
       "custom_domain": true
     }
-  ]
+  ],
 
   // APP_SECRET is intentionally NOT declared here — it is set via
   // `wrangler secret put APP_SECRET --name questkit-worker-demo` at deploy
   // time and reaches the worker via `c.env.APP_SECRET`. The value must
   // match the APP_SECRET on `questkit-worker-api` so the upstream
-  // /v1/auth/token call succeeds.
+  // /v1/auth/token call succeeds. In CI, the secret is injected via the
+  // `secrets:` input of cloudflare/wrangler-action.
+  "env": {
+    "production": {
+      "name": "questkit-worker-demo",
+      "assets": {
+        "directory": "./dist",
+        "not_found_handling": "single-page-application",
+        "binding": "ASSETS_BINDING",
+        "run_worker_first": ["/api/*"]
+      },
+      "routes": [
+        {
+          "pattern": "questkit.jairukchan.com",
+          "custom_domain": true
+        }
+      ]
+    }
+  }
 }

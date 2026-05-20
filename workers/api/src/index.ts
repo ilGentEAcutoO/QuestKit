@@ -20,6 +20,7 @@ import { HTTPException } from "hono/http-exception";
 import authRouter from "./routes/auth";
 import balanceRouter from "./routes/balance";
 import campaignsRouter from "./routes/campaigns";
+import demoRouter from "./routes/demo";
 import eventsRouter from "./routes/events";
 import missionsRouter from "./routes/missions";
 import recommendationsRouter from "./routes/recommendations";
@@ -57,7 +58,7 @@ app.use(
 app.get("/v1/health", (c) => {
   return c.json({
     ok: true,
-    version: "0.1.0",
+    version: "0.1.4",
     commit: c.env.GIT_SHA ?? "dev",
   });
 });
@@ -78,6 +79,15 @@ app.route("/v1/balance", balanceRouter);
  * /v1/campaigns — campaign read (TASK-010). JWT-protected.
  */
 app.route("/v1/campaigns", campaignsRouter);
+
+/**
+ * /v1/demo — demo-user utilities (Phase 8 / TASK-003). JWT-protected, with
+ * an additional gate requiring `kind: "demo"` on the JWT AND a `demo_`
+ * userId prefix. POST /v1/demo/reset wipes the caller's `mission_progress`,
+ * `balances`, `events`, and per-user KV scratch space in one atomic D1
+ * batch + a best-effort KV sweep.
+ */
+app.route("/v1/demo", demoRouter);
 
 /**
  * /v1/events — event ingestion. JWT-protected (mounted middleware in the
@@ -184,7 +194,12 @@ export class ApiService extends WorkerEntrypoint<Env> {
         ? { idempotencyKey: event.idempotencyKey }
         : {}),
     };
-    const result = await ingestEventCore(this.env, body);
+    // `this.ctx.waitUntil` lets the SSE broadcast fan-out (inside
+    // `ingestEventCore`) run detached from the RPC response — same fix as
+    // the HTTP route. See Phase 8 / v0.1.4 TASK-001.
+    const result = await ingestEventCore(this.env, body, {
+      waitUntil: (p) => this.ctx.waitUntil(p),
+    });
     return { accepted: true, missionsUpdated: result.missionsUpdated };
   }
 }

@@ -16,6 +16,9 @@
  *   - "network_error"       — fetch threw / aborted unexpectedly
  *   - "invalid_response"    — server returned a non-JSON / malformed body
  *   - "config_error"        — SDK misconfiguration (e.g. missing baseUrl)
+ *   - "timeout"             — request exceeded the configured `timeoutMs`
+ *                              (defense-in-depth so a stalled API never
+ *                              wedges UI state — see TASK-005 of v0.1.4).
  */
 export class QuestKitError extends Error {
   public readonly code: string;

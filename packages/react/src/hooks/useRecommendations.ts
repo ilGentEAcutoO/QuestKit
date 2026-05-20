@@ -11,6 +11,9 @@
  *     CacheEntry>` so multiple mounts of `<RecommendedMissions>` in the
  *     same React tree don't hammer the endpoint. Per-userId scope avoids
  *     cross-user mixups in multi-user host apps.
+ *     Fallback responses (`fallback: true`) are NEVER written to this cache
+ *     — the server skips KV cache for fallbacks so the next call retries the
+ *     AI, and caching them client-side would defeat that retry path.
  *
  * SSE invalidation: when the server emits an `SDKUpdate` of type
  * `recommendation`, we invalidate the matching userId's cache entry so the
@@ -118,7 +121,13 @@ export function useRecommendations(): HookState<RecommendationsResult> {
         // Cache MISS or bypass — go to the server.
         const next = await client.getRecommendations();
         if (!isMountedRef.current) return;
-        writeCache(userId, next);
+        // Do NOT cache fallback responses — the server intentionally skips KV
+        // cache on fallback so the next call retries the AI. Caching here for
+        // 5 minutes would defeat that and trap users on a stale empty-state
+        // long after the AI is back up.
+        if (next.fallback !== true) {
+          writeCache(userId, next);
+        }
         setData(next);
         setIsLoading(false);
       } catch (err) {

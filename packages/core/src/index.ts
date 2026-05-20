@@ -24,3 +24,7 @@ export type {
   RecommendationsResult,
 } from "./client";
 export { QuestKitError } from "./errors";
+// Surfaced so out-of-band reset flows (e.g. the demo's DevTools "Reset user")
+// can wipe the persisted event queue alongside their own localStorage keys.
+// See event-queue.ts for the rationale.
+export { EVENT_QUEUE_STORAGE_KEY } from "./event-queue";

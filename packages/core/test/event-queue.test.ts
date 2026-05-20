@@ -1,5 +1,6 @@
 import type { Event } from "@questkit/types";
 import {
+  EVENT_QUEUE_STORAGE_KEY,
   EventQueue,
   type QueuedEvent,
   type SendFn,
@@ -253,5 +254,31 @@ describe("eventQueue listener errors", () => {
     });
     expect(() => q.enqueue(evt({ idempotencyKey: "a" }))).not.toThrow();
     expect(q.size()).toBe(1);
+  });
+});
+
+describe("eventQueue storage-key export", () => {
+  // The EVENT_QUEUE_STORAGE_KEY constant is the SDK's contract with out-of-
+  // band reset flows (e.g. the demo's DevTools "Reset user", which wipes
+  // localStorage to make the server's /v1/demo/reset effective). Changing
+  // the literal is a breaking change for any consumer that hardcoded it —
+  // this test pins both the public string AND its alignment with the
+  // queue's actual persistence location.
+  it("exports the documented literal", () => {
+    expect(EVENT_QUEUE_STORAGE_KEY).toBe("qk:event-queue");
+  });
+
+  it("matches the key a default-configured EventQueue actually persists under", () => {
+    const storage = new MemoryStorage();
+    const q = new EventQueue({ storage });
+    q.enqueue(evt({ idempotencyKey: "a" }));
+    // After enqueue, the queue has persisted to storage under the exported
+    // key. If someone renames DEFAULT_STORAGE_KEY without updating the
+    // exported constant, this test fails fast.
+    const raw = storage.get(EVENT_QUEUE_STORAGE_KEY);
+    expect(raw).not.toBeNull();
+    const parsed = JSON.parse(raw as string) as QueuedEvent[];
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]?.idempotencyKey).toBe("a");
   });
 });

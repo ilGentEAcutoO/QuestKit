@@ -32,6 +32,7 @@ curl https://api.questkit.jairukchan.com/v1/recommendations \
 | `reason`     | `string`   | One-sentence "why" the AI surfaced these. Safe to render as italic caption copy.                   |
 | `cached`     | `boolean`  | `true` when served from the 1-hour KV cache.                                                       |
 | `count`      | `number`   | `= missionIds.length`. Lets the UI check `count === 0` without scanning the array.                 |
+| `fallback`   | `boolean?` | Present and `true` only when the AI was unavailable / malformed — see "Graceful fallback" below.   |
 
 ## Empty cases
 
@@ -46,13 +47,29 @@ curl https://api.questkit.jairukchan.com/v1/recommendations \
   ```
 - **AI returned nothing useful** → `missionIds: []`, with a reason explaining the empty result.
 
+## Graceful fallback — 200 OK (`fallback: true`)
+
+Since v0.1.4, when the Workers AI binding returns a malformed payload or fails outright (timeout, outage, deprecated model envelope mismatch), the route degrades gracefully instead of returning 502/503. The body is:
+
+```json
+{
+  "missionIds": [],
+  "reason": "AI picks unavailable right now.",
+  "cached": false,
+  "count": 0,
+  "fallback": true
+}
+```
+
+Clients should branch on `fallback === true` and render a tasteful empty-state (the bundled `<RecommendedMissions>` React component already does this). Fallback results are **not** cached — the next call retries the AI.
+
 ## Errors
 
-| HTTP | `error` code            | Meaning                                                           |
-| ---- | ----------------------- | ----------------------------------------------------------------- |
-| 401  | `unauthorized`          | Missing or invalid JWT.                                           |
-| 502  | `ai_response_malformed` | AI returned non-JSON or unparseable output.                       |
-| 503  | `ai_unavailable`        | Workers AI binding failed (binding error, timeout, model outage). |
+| HTTP | `error` code   | Meaning                 |
+| ---- | -------------- | ----------------------- |
+| 401  | `unauthorized` | Missing or invalid JWT. |
+
+AI failure modes no longer surface as HTTP errors — see "Graceful fallback" above.
 
 ## What goes into the prompt
 

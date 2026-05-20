@@ -49,5 +49,35 @@
       "service": "questkit-worker-api",
       "entrypoint": "ApiService"
     }
-  ]
+  ],
+
+  // env.production — used by CI deploys via `wrangler deploy --env production`.
+  // The consumer has no D1/KV/R2 of its own; the production block exists so
+  // .github/workflows/deploy.yml can pass `--env production` uniformly across
+  // all six workers without surprising fallthrough. Wrangler does not inherit
+  // bindings into env subblocks, so everything is redeclared.
+  "env": {
+    "production": {
+      "name": "questkit-worker-webhook-consumer",
+      "queues": {
+        "consumers": [
+          {
+            "queue": "questkit-queue-webhooks",
+            "max_batch_size": 10,
+            "max_batch_timeout": 30,
+            "max_retries": 5,
+            "dead_letter_queue": "questkit-queue-webhooks-dlq",
+            "retry_delay": 30
+          }
+        ]
+      },
+      "services": [
+        {
+          "binding": "API",
+          "service": "questkit-worker-api",
+          "entrypoint": "ApiService"
+        }
+      ]
+    }
+  }
 }

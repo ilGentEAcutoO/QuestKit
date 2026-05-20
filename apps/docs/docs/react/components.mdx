@@ -152,6 +152,8 @@ AI-curated mission suggestions. Composes `useRecommendations()` + per-ID `useMis
 
 Shows a "Refreshes hourly" hint when `cached: true`. Falls back to an empty-state message when the AI has no suggestions yet.
 
+When the server indicates `fallback: true` (AI binding outage or malformed response), the widget renders a tasteful empty-state ("AI picks unavailable right now") with no error code visible — the rest of the UI is unaffected.
+
 :::note
 The mini-game widgets (`<SpinWheel>`, `<ScratchCard>`) live on their own page — see [Mini-Games](./mini-games.mdx).
 :::

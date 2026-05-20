@@ -31,15 +31,20 @@
  *   - `iat`  issued-at, seconds since epoch
  *   - `exp`  expiry,    seconds since epoch
  *   - `jti`  unique JWT id — used as the denylist key in KV (per plan §5)
+ *   - `kind` optional capability marker. Today only "demo" is recognised,
+ *     used by `/v1/demo/reset` to gate the dangerous data-wipe endpoint
+ *     (Phase 8 / TASK-003). Tokens minted via the regular path omit this
+ *     field entirely.
  *
  * No `iss`/`aud` because QuestKit is single-issuer; no extra fields because
- * downstream middleware only needs `sub` and `jti`.
+ * downstream middleware only needs `sub`, `jti`, and (now) `kind`.
  */
 export interface JwtPayload {
   sub: string;
   iat: number;
   exp: number;
   jti: string;
+  kind?: "demo";
 }
 
 /**
