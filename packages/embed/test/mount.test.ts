@@ -32,6 +32,7 @@ interface FakeClientShape {
   getRecommendations: jest.Mock;
   getUserId: jest.Mock;
   subscribe: jest.Mock;
+  onFireEventSuccess: jest.Mock;
   destroy: jest.Mock;
   claimMission: jest.Mock;
 }
@@ -69,6 +70,11 @@ function makeFake(): FakeClientShape {
     getRecommendations: jest.fn(),
     getUserId: jest.fn(),
     subscribe: jest.fn().mockReturnValue(() => {}),
+    // TASK-006 added `onFireEventSuccess(cb): () => void` to the SDK class —
+    // `useMissions` subscribes to it for optimistic progress updates. The mock
+    // mirrors the real shape: register a no-op subscription, return an
+    // unsubscribe.
+    onFireEventSuccess: jest.fn().mockReturnValue(() => {}),
     destroy: jest.fn(),
     claimMission: jest.fn(),
   };
