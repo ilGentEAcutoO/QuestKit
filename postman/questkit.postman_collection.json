@@ -411,6 +411,90 @@
           ]
         },
         {
+          "name": "[setup] Fire purchase.completed 2/3 for M1 prefire",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "content-type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{prefire_key_2}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/events",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "events"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"{{user_id}}\",\n  \"name\": \"purchase.completed\",\n  \"payload\": { \"category\": \"books\", \"amount\": 10 },\n  \"timestamp\": {{$timestamp}}\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('prefire_key_2', 'newman_prefire2_' + Date.now());",
+                  "pm.variables.set('$timestamp', Date.now());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK (M1 prefire #2)', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "[setup] Fire purchase.completed 3/3 for M1 prefire",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "content-type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{prefire_key_3}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/events",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "events"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"{{user_id}}\",\n  \"name\": \"purchase.completed\",\n  \"payload\": { \"category\": \"books\", \"amount\": 10 },\n  \"timestamp\": {{$timestamp}}\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('prefire_key_3', 'newman_prefire3_' + Date.now());",
+                  "pm.variables.set('$timestamp', Date.now());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK (M1 prefire #3 — M1 now completed)', () => pm.response.to.have.status(200));",
+                  "pm.test('M1 listed in missionsUpdated', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.missionsUpdated, 'after 3rd purchase.completed, M1 should appear').to.include('mis_ecom_daily_purchase_3');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Claim mission (POST /v1/missions/mis_ecom_daily_purchase_3/claim)",
           "request": {
             "method": "POST",
