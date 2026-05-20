@@ -77,6 +77,20 @@ export function MissionCard({
   const targetCount = progress?.targetCount ?? mission.criteria.count;
   const percent = progress?.progress ?? 0;
 
+  // Defense in depth: the server's rule engine can let `currentCount`
+  // overshoot the target (e.g. fire 19 events on a count-5 mission). The
+  // UI must never reflect that — a counter like "19 / 5" or "380%" is
+  // confusing and erodes trust. We clamp every render-path here:
+  //   - the visible counter text ("5 / 5")
+  //   - the percent badge ("100%")
+  //   - the ProgressBar's aria-label ("Progress: 5 of 5")
+  // The ProgressBar itself already clamps the fill width, but we still
+  // pass the clamped values so aria-valuenow / aria-label agree with the
+  // visual.
+  const displayCurrent =
+    currentCount > targetCount ? targetCount : currentCount;
+  const displayPercent = percent > 1 ? 1 : percent < 0 ? 0 : percent;
+
   // Decide which claim-button mode (hidden | enabled | disabled | claimed).
   let claimMode: "hidden" | "enabled" | "pending" | "claimed";
   if (status === "claimed") {
@@ -203,16 +217,28 @@ export function MissionCard({
 
       <div className="qk-mission-card-progress">
         <ProgressBar
-          value={currentCount}
+          value={displayCurrent}
           max={targetCount > 0 ? targetCount : 1}
-          label={`Progress: ${currentCount} of ${targetCount}`}
+          label={`Progress: ${displayCurrent} of ${targetCount}`}
         />
         <p
           className="qk-mission-card-progress-text text-xs mt-1"
-          style={{ opacity: 0.7 }}
+          style={{ opacity: status === "claimed" ? 0.45 : 0.7 }}
         >
-          {Math.round(percent * 100)}% · {currentCount} / {targetCount}
+          {Math.round(displayPercent * 100)}% · {displayCurrent} / {targetCount}
         </p>
+        {status === "claimed" && (
+          <p
+            className="qk-mission-card-claimed-hint text-xs mt-1"
+            style={{
+              opacity: 0.7,
+              color: "var(--color-qk-primary)",
+              fontWeight: 500,
+            }}
+          >
+            <span aria-hidden="true">✓ </span>claimed today
+          </p>
+        )}
       </div>
 
       {claimMode !== "hidden" && (
