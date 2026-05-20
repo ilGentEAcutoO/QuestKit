@@ -5,6 +5,43 @@ All notable changes to QuestKit are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] — 2026-05-20
+
+Polish release driven by the post-launch `/frontend-test` PDCA sweep.
+Zero functional changes from v0.1.0; only console-hygiene and visual-
+consistency fixes.
+
+### Fixed
+
+- **`GET /v1/balance/:currency` now returns 200 + zero-state** instead of
+  404 when the user has no row for the requested currency. The 404
+  generated noisy "Failed to load resource" entries in every demo
+  consumer's console even though the SDK already rendered both states
+  as "0". `@questkit/core` `getBalance()` return type tightened from
+  `Balance | null` to `Balance`.
+- **JWT signature-tamper test flake** — flip the FIRST char of the
+  base64url signature (fully-used 6-bit position) instead of the LAST
+  (only 4 meaningful + 4 unused bits). CI failed intermittently when
+  the unlucky last-char flip only touched unused bits.
+
+### Changed
+
+- **`🪙` / `🏆` / `🎁` reward emojis replaced with inline SVG icons**
+  (`apps/demo/src/components/icons.tsx`). Emoji glyphs render
+  inconsistently across OS font stacks — Windows shows a grayscale
+  pixelated U+1FA99 while macOS/iOS shows the gold coin you'd expect.
+  SVG ensures the same brand impression everywhere. Used in both the
+  header coin balance pill and the reward toast.
+
+### Test report
+
+See [`instruction/work/test-report.md`](instruction/work/test-report.md)
+for the full PDCA log: 4 routes × console hygiene = 0 errors / 0
+warnings, 5/5 Playwright golden-path E2E green vs production, 441
+unit/integration tests across 6 packages.
+
+[0.1.1]: https://github.com/ilGentEAcutoO/QuestKit/releases/tag/v0.1.1
+
 ## [0.1.0] — 2026-05-20
 
 First public release. Six-day, six-phase build of an embeddable
@@ -145,3 +182,5 @@ true`. CF auto-provisions DNS + SSL on first deploy. All 5 worker
   GitHub Actions secret `QUESTKIT_APP_SECRET`.
 
 [0.1.0]: https://github.com/ilGentEAcutoO/QuestKit/releases/tag/v0.1.0
+
+<!-- Diff: https://github.com/ilGentEAcutoO/QuestKit/compare/v0.1.0...v0.1.1 -->

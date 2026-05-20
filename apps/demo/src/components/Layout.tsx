@@ -3,6 +3,8 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { lazy, type ReactElement, Suspense, useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 
+import { CoinIcon } from "./icons";
+
 // Defer floating panels to a separate chunk so the initial visual frame
 // (header + main content) ships without their framer-motion / SSE wiring.
 // We render them after first paint via requestIdleCallback / setTimeout so
@@ -59,58 +61,6 @@ const NAV: NavItem[] = [
   { to: "/daily", label: "Daily Streak", emoji: "📅" },
   { to: "/minigames", label: "Mini-Games", emoji: "🎰" },
 ];
-
-/**
- * Inline SVG coin icon. Replaces the 🪙 emoji which rendered differently
- * across OS/browser font stacks (the system-emoji on Windows is gray and
- * pixelated). The SVG uses the brand gold gradient + a stylized "¢" so
- * the header pill matches the social-preview card.
- */
-function CoinIcon(): ReactElement {
-  return (
-    <svg
-      width="18"
-      height="18"
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-      focusable="false"
-    >
-      <defs>
-        <linearGradient id="qk-coin-grad" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="oklch(0.88 0.16 95)" />
-          <stop offset="100%" stopColor="oklch(0.62 0.16 65)" />
-        </linearGradient>
-      </defs>
-      <circle
-        cx="12"
-        cy="12"
-        r="10"
-        fill="url(#qk-coin-grad)"
-        stroke="oklch(0.45 0.14 60)"
-        strokeWidth="0.6"
-      />
-      <circle
-        cx="12"
-        cy="12"
-        r="7.4"
-        fill="none"
-        stroke="oklch(0.45 0.14 60 / 0.45)"
-        strokeWidth="0.6"
-      />
-      <text
-        x="12"
-        y="16"
-        textAnchor="middle"
-        fontFamily="ui-sans-serif, system-ui, sans-serif"
-        fontSize="11"
-        fontWeight="800"
-        fill="oklch(0.32 0.12 55)"
-      >
-        ¢
-      </text>
-    </svg>
-  );
-}
 
 function CoinBalancePulse(): ReactElement {
   const balance = useBalance("coin");

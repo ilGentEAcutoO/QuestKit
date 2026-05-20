@@ -28,6 +28,8 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
+import { BadgeIcon, CoinIcon, GiftIcon } from "./icons";
+
 interface ToastItem {
   id: number;
   reward: Reward;
@@ -49,10 +51,11 @@ function rewardLabel(reward: Reward): string {
   return `${reward.quantity}× ${reward.itemId}`;
 }
 
-function rewardIcon(reward: Reward): string {
-  if (reward.kind === "currency") return "🪙";
-  if (reward.kind === "badge") return "🏆";
-  return "🎁";
+function RewardIcon({ reward }: { reward: Reward }): ReactElement {
+  // 24px to match the 9×9-tailwind (36px) container with a comfortable bezel.
+  if (reward.kind === "currency") return <CoinIcon size={24} />;
+  if (reward.kind === "badge") return <BadgeIcon size={24} />;
+  return <GiftIcon size={24} />;
 }
 
 interface DemoToastProviderProps {
@@ -131,13 +134,13 @@ export function DemoToastProvider({
                   >
                     <span
                       aria-hidden="true"
-                      className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-lg"
+                      className="grid h-9 w-9 shrink-0 place-items-center rounded-full"
                       style={{
-                        background: "var(--color-qk-coin)",
-                        color: "var(--color-qk-fg)",
+                        background: "oklch(0.96 0.01 95)",
+                        border: "1px solid oklch(0.85 0.04 90)",
                       }}
                     >
-                      {rewardIcon(item.reward)}
+                      <RewardIcon reward={item.reward} />
                     </span>
                     <span className="flex-1 text-sm font-semibold">
                       {rewardLabel(item.reward)}
