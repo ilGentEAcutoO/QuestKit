@@ -608,7 +608,7 @@
           ]
         },
         {
-          "name": "Get single balance — missing (GET /v1/balance/nonexistent)",
+          "name": "Get single balance — missing → zero-state (GET /v1/balance/nonexistent)",
           "request": {
             "method": "GET",
             "header": [],
@@ -624,10 +624,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('404 Not Found', () => pm.response.to.have.status(404));",
-                  "pm.test('error === balance_not_found', () => {",
+                  "pm.test('200 OK (synthesises zero-state, no more 404)', () => pm.response.to.have.status(200));",
+                  "pm.test('balance.currency + amount === 0 + updatedAt', () => {",
                   "  const j = pm.response.json();",
-                  "  pm.expect(j.error).to.equal('balance_not_found');",
+                  "  pm.expect(j.balance).to.be.an('object');",
+                  "  pm.expect(j.balance.currency).to.equal('nonexistent');",
+                  "  pm.expect(j.balance.amount).to.equal(0);",
+                  "  pm.expect(j.balance.updatedAt).to.be.a('number');",
                   "});"
                 ]
               }

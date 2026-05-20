@@ -425,13 +425,20 @@ describe("questKitClient.getBalances / getBalance", () => {
     client.destroy();
   });
 
-  it("returns null when single-balance is 404", async () => {
-    const { fetchImpl } = mockFetch([
-      jsonResponse({ error: "balance_not_found" }, 404),
-    ]);
+  it("returns the zero-state balance when the server has no row", async () => {
+    // v0.1.0+ the API returns 200 + a synthetic zero balance for missing
+    // currencies (no more 404). The client always resolves to a Balance.
+    const zero: Balance = {
+      userId: "user1",
+      currency: "gem",
+      amount: 0,
+      updatedAt: 1779_000_000_000,
+    };
+    const { fetchImpl } = mockFetch([jsonResponse({ balance: zero })]);
     const client = makeClient(fetchImpl);
     const r = await client.getBalance("gem");
-    expect(r).toBeNull();
+    expect(r).toEqual(zero);
+    expect(r.amount).toBe(0);
     client.destroy();
   });
 

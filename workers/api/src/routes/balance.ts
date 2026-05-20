@@ -12,12 +12,13 @@
  *     special case.
  *
  *   GET /v1/balance/:currency
- *     Returns `{ balance: Balance }` or 404 if the row doesn't exist.
- *     NOTE: 404 here means "the user has never had a balance in this
- *     currency", which clients should treat as "balance is 0" for display
- *     purposes. We pick 404 (truthful: the row doesn't exist) over a synthetic
- *     0-balance because callers can disambiguate "never minted" from
- *     "minted-then-decremented-to-zero" if they need to.
+ *     Returns `{ balance: Balance }` — always 200. When the user has never
+ *     had a row for this currency, returns a synthetic `{ amount: 0,
+ *     updatedAt: Date.now() }` zero-state. Previously this returned 404
+ *     to let callers distinguish "never minted" from "decremented-to-0",
+ *     but in practice every consumer renders both as "0 coin" and the
+ *     404 generated noisy browser console errors. The graceful empty-
+ *     state is the right call.
  */
 import type { Balance } from "@questkit/types";
 import { Hono } from "hono";
@@ -43,10 +44,15 @@ balance.get("/:currency", async (c) => {
   const userId = c.var.userId;
   const currency = c.req.param("currency");
   const row = await getBalance(c.env.DB, userId, currency);
-  if (row === null) {
-    return c.json({ error: "balance_not_found" }, 404);
-  }
-  return c.json({ balance: row } satisfies { balance: Balance }, 200);
+  // Graceful empty-state: synthesize a zero balance when the row doesn't
+  // exist. Same shape as a real Balance — consumers render it identically.
+  const balance: Balance = row ?? {
+    userId,
+    currency,
+    amount: 0,
+    updatedAt: Date.now(),
+  };
+  return c.json({ balance } satisfies { balance: Balance }, 200);
 });
 
 export default balance;

@@ -412,17 +412,21 @@ export class QuestKitClient {
   }
 
   /**
-   * Get the balance for a single currency. Returns `null` when the server
-   * returns 404 (the user has never had a row in this currency). Other
-   * non-2xx responses throw.
+   * Get the balance for a single currency. Always resolves to a `Balance`
+   * (the server returns a synthetic `{ amount: 0 }` zero-state when the
+   * user has never had a row in this currency), so the return type is
+   * `Balance` rather than `Balance | null`. Non-2xx responses throw.
+   *
+   * Compatibility: prior to v0.1.0 this returned `null` on 404; that path
+   * is unreachable now but harmless if a downstream consumer still checks
+   * for null.
    */
-  async getBalance(currency: string): Promise<Balance | null> {
+  async getBalance(currency: string): Promise<Balance> {
     this.ensureAlive();
     const resp = await this.authedFetch(
       `/v1/balance/${encodeURIComponent(currency)}`,
       { method: "GET" },
     );
-    if (resp.status === 404) return null;
     if (!resp.ok) throw await this.errorFromResponse(resp);
     const body = (await resp.json()) as { balance: Balance };
     return body.balance;

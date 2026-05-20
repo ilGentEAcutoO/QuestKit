@@ -135,20 +135,35 @@ describe("get /v1/balance", () => {
 // ----- GET /v1/balance/:currency -----------------------------------------
 
 describe("get /v1/balance/:currency", () => {
-  it("returns 404 balance_not_found when the user has no row for that currency", async () => {
+  it("returns 200 + zero-state when the user has no row for that currency", async () => {
     const userId = "u_balance_currency_404";
     const { token } = await mintToken(userId);
     const res = await getBalanceCurrency("coin", { token });
-    expect(res.status).toBe(404);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toBe("balance_not_found");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      balance: {
+        userId: string;
+        currency: string;
+        amount: number;
+        updatedAt: number;
+      };
+    };
+    expect(body.balance.userId).toBe(userId);
+    expect(body.balance.currency).toBe("coin");
+    expect(body.balance.amount).toBe(0);
+    expect(typeof body.balance.updatedAt).toBe("number");
   });
 
-  it("returns 404 for an unknown currency string", async () => {
+  it("returns 200 + zero-state for an unknown currency string", async () => {
     const userId = "u_balance_currency_unknown";
     const { token } = await mintToken(userId);
     const res = await getBalanceCurrency("totally_made_up", { token });
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      balance: { currency: string; amount: number };
+    };
+    expect(body.balance.currency).toBe("totally_made_up");
+    expect(body.balance.amount).toBe(0);
   });
 
   it("returns 200 with the balance after a claim mints currency", async () => {
