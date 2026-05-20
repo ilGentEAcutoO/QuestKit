@@ -312,3 +312,77 @@
 - 🟢 completed — implementation + tests done, verification passed
 - 🔴 blocked — see Progress Notes for blocker
 - ⚫ skipped — moved to roadmap with rationale
+
+---
+
+## RESUME CONTEXT
+
+> Exit time: 2026-05-20 21:55 (Asia/Bangkok)
+> Reason: user invoked `/workflow-exit` (เดี๋ยวกลับมา)
+> Branch: `main` (PR #12 merged at 14:18 UTC as merge commit `4ad7fb8`)
+> Last commit: `17e657e fix(ci): build workspace deps before static-asset workers`
+
+### Where we are
+
+**9 of 10 tasks fully done + merged to `main`.** Only TASK-010 (browser sanity walkthrough on live URL) remains. Live URL is `https://questkit.jairukchan.com`.
+
+### What just happened (chronological)
+
+1. PR #12 merged at 14:18 UTC — merge commit `4ad7fb8` on `main` includes all 9 task branches + their fixup commits.
+2. CI on main passed (run `26168580077`).
+3. **First `Deploy` workflow run `26168808391` FAILED** — vite failed to resolve `@questkit/react/styles.css` because `pnpm --filter @questkit/demo build` ran without the `...` topological suffix, so the workspace deps (`@questkit/react`) weren't built first. Locally masked because `pnpm test` / `pnpm typecheck` go through turbo which builds deps eagerly.
+4. Fixed in commit `17e657e` — added `...` suffix to all three filtered builds in `.github/workflows/deploy.yml`'s "Build static-asset workers" step.
+5. New CI run `26170515656` was `in_progress` at exit time (started 14:51 UTC). When CI passes, `workflow_run` will trigger a fresh Deploy.
+
+### Next steps when you return
+
+1. **Check Deploy status** — was it run `26170515656`'s downstream Deploy?
+   ```
+   gh run list --branch main --limit 5 --json name,status,conclusion,databaseId,createdAt
+   ```
+2. **If Deploy succeeded:**
+   - Verify live demo: `curl -i https://api.questkit.jairukchan.com/v1/health` should return `{"ok":true,"version":"0.1.4",...}` with HTTP 200.
+   - Verify D1 migrations applied: `cd workers/api && pnpm wrangler d1 execute questkit-d1-main --remote --config wrangler.dev.jsonc --command "SELECT name FROM d1_migrations ORDER BY id;"` — expect 0001..0004.
+   - Run TASK-010: MCP Playwright walkthrough on `https://questkit.jairukchan.com` covering every button on every route (ecommerce, streaming, daily, minigames + cross-cutting). Capture screenshots/GIF for `instruction/work/test-report.md`. Coverage matrix in `plan.md` §Test Specifications.
+3. **If Deploy failed again:**
+   - `gh run view <run-id> --log-failed | tail -100` to find the failing step.
+   - Likely candidates: secret missing (mismatch between Cloudflare and GitHub — both should sync, I rotated them all at 14:14 UTC), wrangler binding error, smoke check timeout on first deploy (TLS warm-up — TASK-007 implementer noted ~150s; the smoke step retries 3× with 10s gaps).
+
+### Secrets state (synced at 14:14 UTC)
+
+GitHub Actions secrets:
+
+- `CLOUDFLARE_API_TOKEN` ✅ — pulled from `.env` `CF_TOKEN`
+- `JWT_SECRET` ✅ — freshly rotated 128-char hex, mirrors Cloudflare worker `questkit-worker-api` binding
+- `APP_SECRET` ✅ — mirrors `questkit-worker-api` + `questkit-worker-demo` bindings
+- `QUESTKIT_APP_SECRET` ✅ — same value as `APP_SECRET` (Newman job backward compat)
+- `WEBHOOK_HMAC_SECRET` ✅ — mirrors `questkit-worker-api` + `questkit-worker-webhook-relay` bindings
+- `SONAR_TOKEN` ✅ — pre-existing, untouched
+
+Cloudflare worker secrets (`wrangler secret put` outputs all confirmed ✨ Success):
+
+- `questkit-worker-api`: JWT_SECRET + APP_SECRET + WEBHOOK_HMAC_SECRET
+- `questkit-worker-demo`: APP_SECRET
+- `questkit-worker-webhook-relay`: WEBHOOK_HMAC_SECRET
+
+### Disposable state on disk
+
+- `../QuestKit-worktrees/task-{001..006}/` — 6 git worktrees. Safe to remove after deploy succeeds:
+  ```
+  for i in 001 002 003 004 005 006; do git worktree remove "../QuestKit-worktrees/task-$i" --force; done
+  rmdir ../QuestKit-worktrees
+  git branch -D task-001-sse-deadlock task-002-ai-envelope task-003-demo-reset task-004-counter-cap task-005-fe-timeouts task-006-optimistic-counters
+  ```
+- `phase-8-v0.1.4` local branch — also safe to delete after merge confirmed:
+  ```
+  git branch -d phase-8-v0.1.4
+  ```
+
+### Background tasks at exit
+
+- Monitor `b1b2cdjik` (CI + Deploy chain watcher) — **stopped** before exit. No leftover processes.
+- No active subagents — all per-task implementers + reviewers + fixups have completed and returned.
+
+### File Lock Registry — cleared
+
+All task branches merged to `main`. Lock registry in this file (§File Lock Registry above) is historical only — no active locks.
