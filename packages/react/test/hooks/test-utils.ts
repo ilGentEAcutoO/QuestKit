@@ -45,6 +45,7 @@ export interface FakeClient {
   getRecommendations: jest.Mock<Promise<RecommendationsResult>, []>;
   getUserId: jest.Mock<Promise<string>, []>;
   subscribe: jest.Mock<() => void, [(u: SDKUpdate) => void]>;
+  onFireEventSuccess: jest.Mock<() => void, [(missionIds: string[]) => void]>;
   destroy: jest.Mock<void, []>;
 }
 
@@ -87,6 +88,7 @@ export function makeFakeClient(
       .mockRejectedValue(new Error("getRecommendations not stubbed")),
     getUserId: jest.fn().mockRejectedValue(new Error("getUserId not stubbed")),
     subscribe: jest.fn().mockReturnValue(() => {}),
+    onFireEventSuccess: jest.fn().mockReturnValue(() => {}),
     destroy: jest.fn(),
     ...overrides,
   };

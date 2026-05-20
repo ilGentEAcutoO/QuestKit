@@ -1,17 +1,32 @@
 import type { MissionsListOpts, MissionsListResponse } from "@questkit/core";
 
-import type { SDKUpdate } from "@questkit/types";
+import type { MissionProgress, SDKUpdate } from "@questkit/types";
 import type { HookState } from "./types";
 import { QuestKitError } from "@questkit/core";
 
 /**
  * useMissions — fetch missions + progress and keep `progress` live by
- * folding in `mission.progress` / `mission.completed` SSE updates.
+ * folding in `mission.progress` / `mission.completed` SSE updates, plus
+ * optimistic `+1` bumps from successful `fireEvent` calls (TASK-006).
  *
  * The hook intentionally does NOT mutate the `missions` array on SSE —
  * mission definitions don't change at runtime, only their progress does.
  * If a campaign curator updates a mission server-side, the consumer must
  * call `refetch()`.
+ *
+ * Dedupe / overlap policy (TASK-006):
+ *   When `fireEvent` succeeds, the server returns `missionsUpdated: string[]`
+ *   (mission IDs that progressed) — but NOT the new currentCount. We
+ *   optimistically increment local `currentCount` by 1, clamped at
+ *   `targetCount`. SSE later delivers the authoritative `mission.progress`
+ *   update for the same mission, and that overwrites the optimistic state
+ *   (last-writer-wins; the SSE merge above is unconditional). If SSE is
+ *   degraded, the optimistic state is what the user sees — that's the whole
+ *   point of this path.
+ *
+ *   This can briefly drift by ±1 if the user fires several events quickly
+ *   and the server's `mission.progress` for one of them arrives late, but
+ *   the next refetch / completed update will reconcile.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuestKit } from "../provider";
@@ -80,6 +95,54 @@ export function useMissions(
           ...prev,
           progress: { ...prev.progress, [p.missionId]: p },
         };
+      });
+    });
+    return unsub;
+  }, [client]);
+
+  // Optimistic counter updates — TASK-006. See the docblock above for the
+  // dedupe policy. Only bumps missions we already know about; unknown IDs
+  // are ignored (an unknown ID is probably a mission the host hasn't
+  // listed via this hook — e.g. a different campaign).
+  useEffect(() => {
+    const unsub = client.onFireEventSuccess((missionsUpdated) => {
+      if (!isMountedRef.current) return;
+      if (missionsUpdated.length === 0) return;
+      setData((prev) => {
+        if (prev === undefined) return prev;
+        let touched = false;
+        const nextProgress = { ...prev.progress };
+        const now = Date.now();
+        for (const id of missionsUpdated) {
+          const existing = prev.progress[id];
+          if (existing === undefined) continue;
+          const nextCount = Math.min(
+            existing.currentCount + 1,
+            existing.targetCount,
+          );
+          if (nextCount === existing.currentCount) {
+            // Already at target — no change needed, avoid a wasted render.
+            continue;
+          }
+          const reachedTarget = nextCount >= existing.targetCount;
+          const updated: MissionProgress = {
+            ...existing,
+            currentCount: nextCount,
+            progress:
+              existing.targetCount > 0
+                ? nextCount / existing.targetCount
+                : existing.progress,
+            status:
+              reachedTarget && existing.status === "active"
+                ? "completed"
+                : existing.status,
+            updatedAt: Math.max(existing.updatedAt, now),
+          };
+          nextProgress[id] = updated;
+          touched = true;
+        }
+        if (!touched) return prev;
+        return { ...prev, progress: nextProgress };
       });
     });
     return unsub;

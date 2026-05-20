@@ -1,6 +1,6 @@
 # QuestKit — Active Tasks (Phase 8 / v0.1.4)
 
-> Last updated: 2026-05-20 18:20
+> Last updated: 2026-05-20 19:35
 > Plan: [`plan.md`](./plan.md) · Requirements: [`requirements.md`](./requirements.md)
 > Predecessor archived at `../archive/001-phase-7-security-hardening-v0.1.3/`
 
@@ -131,21 +131,25 @@
 
 ### Task: [TASK-006] Optimistic counter updates from `fireEvent`
 
-- **Status:** ⚪ pending
+- **Status:** 🟢 completed
 - **Priority:** low
 - **Parallel:** yes
-- **Assigned:** unassigned
+- **Assigned:** task-006 agent (branch `task-006-optimistic-counters`)
 - **Depends on:** -
 - **Skills:** workflow-work, git-commit
 - **Files:**
-  - `packages/react/src/hooks/useMissions.ts`
-  - `packages/react/src/QuestKitProvider.tsx`
+  - `packages/core/src/client.ts` — added `onFireEventSuccess(cb)` subscribe surface + shared `buildSendFn` that dispatches on success (both immediate and queued-retry paths)
+  - `packages/react/src/hooks/useMissions.ts` — subscribes to `onFireEventSuccess` and bumps `currentCount` (+1, clamped to `targetCount`, flips status to `completed` when reaching target)
+  - `packages/core/test/client.test.ts` — 7 new tests for the subscribe/dispatch surface
+  - `packages/react/test/hooks/useMissions.test.tsx` — 7 new tests under "optimistic updates from fireEvent (no SSE)"
+  - `packages/react/test/hooks/test-utils.ts` — added `onFireEventSuccess` mock to `FakeClient`
 - **Subtasks:**
-  - [ ] implement: SDK exposes `onFireEventSuccess(missionsUpdated)` callback
-  - [ ] implement: `useMissions` merges `missionsUpdated[]` into local progress immediately
-  - [ ] test: simulated SSE outage — counters still advance on `fireEvent`
+  - [x] implement: SDK exposes `onFireEventSuccess(missionsUpdated)` callback
+  - [x] implement: `useMissions` merges `missionsUpdated[]` into local progress immediately (+1, clamped, status auto-completes at target)
+  - [x] test: simulated SSE outage — counters still advance on `fireEvent` (covered by all 7 hook tests; none of them wire up SSE)
 - **Progress Notes:**
   - 2026-05-20 18:20 — Created. Makes counters resilient to any future SSE breakage.
+  - 2026-05-20 19:35 — Done. 14 new tests; core 94/94 + react 132/132 passing. Typecheck clean. Dedupe policy: server-authoritative (SSE/refetch overwrites optimistic state; brief ±1 drift possible if events fire faster than SSE delivers, reconciled by next update). See useMissions.ts header for full policy.
 
 ---
 
