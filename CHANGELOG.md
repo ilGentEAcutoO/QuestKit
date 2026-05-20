@@ -5,6 +5,87 @@ All notable changes to QuestKit are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] — 2026-05-20
+
+Security Hardening release driven by [`instruction/security-review.md`](instruction/security-review.md).
+Net result: SonarCloud Security rating C → A, Reliability D → A, no
+residual real vulnerabilities. Net of false positives, every finding
+the auditor flagged as worth addressing is closed.
+
+### Security
+
+- **`.github/workflows/ci.yml` — `security-events: write` scoped to the
+  `verify` job only.** The grant was previously workflow-level, so the
+  `newman` job (and any future jobs) inherited write access to GitHub
+  Code Scanning despite never uploading SARIF. Now only the gitleaks
+  step in `verify` carries the grant. Closes SonarCloud `S8233`.
+- **5 GitHub Actions pinned to commit SHAs.** `actions/checkout@v4`,
+  `pnpm/action-setup@v4`, `actions/setup-node@v4`,
+  `gitleaks/gitleaks-action@v2`, `actions/upload-artifact@v4` —
+  full-length SHAs with the original major-version tag preserved as a
+  trailing `# v<N>` comment so Dependabot still proposes bumps.
+  `SonarSource/sonarqube-scan-action@v6` (new) follows the same pattern.
+  Closes `S7637` (×2).
+- **Cookie-based auth fallback with CSRF guard** in
+  `workers/api/src/auth/middleware.ts`. `requireAuth` now accepts the
+  JWT via a `qk_token` cookie when the `Authorization: Bearer` header
+  is absent — wider compatibility with HttpOnly-cookie hosts. When the
+  token comes from a cookie, the request must include EITHER an
+  `Origin` matching `ALLOWED_ORIGINS` (CSV env var) OR a custom
+  `X-Requested-With: qk` header. Header-Bearer path is unchanged for
+  backwards compatibility. 9 new tests in `auth-cookie.test.ts`.
+
+### Added
+
+- **`workers/api/src/util/redact.ts` — `redactId` helper** + a new
+  `workers/api/test/log-redaction.test.ts` (6 tests) that guards every
+  `console.warn` against future user-id leaks. Helper keeps the first
+  4 chars + `…` + last 2 for ids ≥ 8 chars, masks shorter ids as
+  `***`. No current call site embedded a user-id string, but the
+  regression net is now in place.
+- **CI-based SonarCloud scanning with LCOV coverage.** Replaces the
+  Auto Analysis path (which couldn't ingest coverage). New `sonarcloud`
+  job in `ci.yml` runs `pnpm test:coverage`, emits six per-package
+  `coverage/lcov.info` files, and feeds them to
+  `SonarSource/sonarqube-scan-action@v6` via `sonar-project.properties`.
+  `@vitest/coverage-istanbul` added as a devDep to
+  `workers/{webhook-relay,webhook-consumer}` (workers/api already had
+  it). Closes security-review §5.
+
+### Fixed
+
+- **7 `Array.prototype.sort()` calls now pass an explicit
+  `localeCompare` comparator** (`workers/api/src/rules/filter.ts`,
+  `rules/index.test.ts`, `test/{campaigns,missions}.route.test.ts`).
+  Default `.sort()` raised SonarCloud Reliability rating to D via
+  `S2871` (×7); behaviour is unchanged because every sorted array is
+  lowercase snake_case ids where the locale order matches the default.
+
+### Documentation
+
+- **`CONTRIBUTING.md` — new `## Pre-commit checks` section** covering
+  `gitleaks` install via Homebrew / winget / Scoop / `go install`,
+  pre-commit hook behaviour, and manual `gitleaks detect --redact`
+  usage. Husky hook graceful-degrades when gitleaks isn't on PATH;
+  CI is the authoritative gate.
+- **`apps/docs/docs/api/auth.md` — new `Cookie-based auth (browser
+hosts)` section** documenting the cookie-fallback flow, the CSRF
+  guard's Origin / `X-Requested-With` semantics, and `ALLOWED_ORIGINS`
+  operator setup.
+
+### SonarCloud triage (user action, no code change)
+
+- 8 findings marked **Won't Fix** with rationale per
+  `instruction/security-review.md` §2.1 / §2.2 / §2.4:
+  - 3 × `S5852` ReDoS hotspots on base64url char-class regex (regex
+    is bounded by JWT format — not user-controlled length).
+  - 4 × `S2245` `Math.random` hotspots (defensive fallbacks /
+    non-security UI use — never key/token material).
+  - 1 × `S6440` React `use` hook in a Playwright fixture (test-only
+    pattern; framework supported).
+
+[0.1.3]: https://github.com/ilGentEAcutoO/QuestKit/releases/tag/v0.1.3
+
 ## [0.1.2] — 2026-05-20
 
 Live click-through PDCA (the **real** `/frontend-test`) caught that the

@@ -1106,7 +1106,7 @@
 
 ### Task: [TASK-038] Pin all GH Actions to commit SHAs
 
-- **Status:** 🟡 in_progress
+- **Status:** 🟢 completed
 - **Priority:** low
 - **Parallel:** yes (file overlap with TASK-035 only)
 - **Assigned:** action-pinner (Wave 2, 2026-05-20)
@@ -1114,11 +1114,12 @@
 - **Skills:** `git-commit`
 - **Files:** `.github/workflows/ci.yml`
 - **Subtasks:**
-  - [ ] implement: pin `actions/checkout@<sha>  # v5`, `actions/setup-node@<sha>  # v5`, `pnpm/action-setup@<sha>  # v5`, `gitleaks/gitleaks-action@<sha>  # v2`, `actions/upload-artifact@<sha>  # v4` — keep the tag in trailing comment so dependabot still proposes bumps
-  - [ ] verify: CI runs to completion with pinned SHAs (lint + Newman both pass)
-  - [ ] verify: SonarCloud `S7637` finding closed (2 instances)
+  - [x] implement: 5 actions pinned at currently-used major versions (v4/v4/v4/v2/v4 — no silent upgrade). Trailing `# v<N>` comments preserve dependabot compatibility.
+  - [ ] verify (post-push): CI runs to completion with pinned SHAs (lint + Newman both pass)
+  - [ ] verify (post-scan): SonarCloud `S7637` finding closed (2 instances)
 - **Progress Notes:**
   - 2026-05-20 11:35 — Task created (closes security-review §2.5)
+  - 2026-05-20 (Wave 2) — Implemented in commit `086827d`. Pins: `actions/checkout@34e1148 # v4`, `pnpm/action-setup@b906aff # v4`, `actions/setup-node@49933ea # v4`, `gitleaks/gitleaks-action@ff98106 # v2`, `actions/upload-artifact@ea165f8 # v4`. Same SHA reused across jobs.
 
 ---
 
@@ -1184,21 +1185,24 @@
 
 ### Task: [TASK-042] Wire up `lcov.info` coverage upload to SonarCloud
 
-- **Status:** ⚪ pending
+- **Status:** 🟢 completed
 - **Priority:** low
 - **Parallel:** no
-- **Assigned:** unassigned
-- **Depends on:** TASK-035 (final CI shape)
+- **Assigned:** coverage-uploader (Wave 2b, 2026-05-20)
+- **Depends on:** TASK-035 (final CI shape), TASK-038 (file overlap on ci.yml)
 - **Skills:** `git-commit`
-- **Files:** Per-package `vitest.config.ts` / `jest.config.cjs` (5 packages), `.github/workflows/ci.yml`, possibly switching SonarCloud back to CI-based mode
+- **Files:** `.github/workflows/ci.yml`, `sonar-project.properties`, `turbo.json`, root `package.json`, `workers/{api,webhook-relay,webhook-consumer}/{vitest.config.ts,package.json}`, `packages/{core,react,embed}/package.json`, `pnpm-lock.yaml`
 - **Subtasks:**
-  - [ ] decide: keep SonarCloud Auto Analysis (no LCOV upload possible) OR switch back to CI-based scanning so we can publish coverage. Document the decision in the task progress notes
-  - [ ] if CI-based chosen: re-enable the `sonarcloud` job in `ci.yml`, gated on `SONAR_TOKEN`; disable Auto Analysis in SonarCloud UI
-  - [ ] implement: enable `coverage: { reporter: ['lcov', 'text-summary'] }` in each test config; aggregate per-package LCOVs into a single `coverage/lcov.info` at repo root (via a small script if needed)
-  - [ ] implement: add `Coverage` step in CI that runs `pnpm test:coverage` and uploads `coverage/lcov.info` as a workflow artifact + (if CI-based) attaches to the sonar scan step
-  - [ ] verify: SonarCloud Coverage metric stops reporting 0 and shows real percentage
+  - [x] decide: **CI-based scanning** chosen (user picked "Switch to CI-based scanning" 2026-05-20)
+  - [x] implement: re-enable `sonarcloud` job in `ci.yml` using `SonarSource/sonarqube-scan-action@fd88b7d…  # v6` (NOT v5 — GHSA-5xq9-5g24-4g6f). All 5 actions in the new job SHA-pinned per TASK-038.
+  - [x] implement: added `"lcov"` to vitest reporter array in the 3 worker configs; added `@vitest/coverage-istanbul ^4.1.6` devDep to webhook-relay + webhook-consumer (workers/api already had it). Jest packages already emitted lcov.
+  - [x] implement: added `pnpm test:coverage` script (root + 3 vitest workers); turbo `test:coverage` task; `sonar-project.properties` updated to 6-path CSV.
+  - [ ] verify (post-push, user action): SonarCloud Coverage metric stops reporting 0 and shows real percentage
+  - [ ] **user prereq before push**: disable Auto Analysis at sonarcloud.io/project/analysis_method?id=ilGentEAcutoO_QuestKit AND verify `SONAR_TOKEN` is set in repo Settings → Secrets → Actions; otherwise the new sonarcloud step fails immediately
 - **Progress Notes:**
   - 2026-05-20 11:35 — Task created (closes security-review §5)
+  - 2026-05-20 (Wave 2) — User picked CI-based scanning over Auto Analysis.
+  - 2026-05-20 (Wave 2b) — Implemented in commit `4c3aefd`. 11 files modified, 6 per-package `coverage/lcov.info` generated locally on `pnpm test:coverage`. Lint/typecheck/test all green. NOT pushed — user must complete the SonarCloud UI prereq first.
 
 ---
 
@@ -1221,8 +1225,9 @@
 | _(released)_ `workers/api/src/rules/filter.ts` + `workers/api/src/rules/index.test.ts` + `workers/api/test/{campaigns,missions}.route.test.ts`                                                                         | sort-comparator-fixer   | TASK-036      | _2026-05-20 (Wave 1 → completed commit `18cc69a`)_                        |
 | _(released)_ `CONTRIBUTING.md`                                                                                                                                                                                         | gitleaks-doc-writer     | TASK-039      | _2026-05-20 (Wave 1 → completed commit `7d6e1f1`)_                        |
 | _(released)_ `workers/api/src/util/redact.ts` + `workers/api/test/log-redaction.test.ts`                                                                                                                               | id-redactor             | TASK-040      | _2026-05-20 (Wave 1 → completed commit `4c174fc`)_                        |
-| `.github/workflows/ci.yml`                                                                                                                                                                                             | action-pinner           | TASK-038      | _2026-05-20 (Wave 2)_                                                     |
-| _(released)_ `workers/api/src/auth/middleware.ts` + `workers/api/src/env.d.ts` + `workers/api/wrangler.jsonc` + `workers/api/vitest.config.ts` + `workers/api/test/auth-cookie.test.ts` + `apps/docs/docs/api/auth.md` | cookie-auth-implementer | TASK-041      | _2026-05-20 16:47 (Wave 2 → ready for commit by team lead)_               |
+| _(released)_ `.github/workflows/ci.yml`                                                                                                                                                                                | action-pinner           | TASK-038      | _2026-05-20 (Wave 2 → completed commit `086827d`)_                        |
+| _(released)_ `workers/api/src/auth/middleware.ts` + `workers/api/src/env.d.ts` + `workers/api/wrangler.jsonc` + `workers/api/vitest.config.ts` + `workers/api/test/auth-cookie.test.ts` + `apps/docs/docs/api/auth.md` | cookie-auth-implementer | TASK-041      | _2026-05-20 16:47 (Wave 2 → completed commit `c6f56f5`)_                  |
+| _(released)_ `.github/workflows/ci.yml` + `sonar-project.properties` + `turbo.json` + root `package.json` + `workers/{api,webhook-relay,webhook-consumer}/{vitest.config.ts,package.json}` + `pnpm-lock.yaml`          | coverage-uploader       | TASK-042      | _2026-05-20 (Wave 2b → completed commit `4c3aefd`)_                       |
 
 ---
 
