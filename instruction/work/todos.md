@@ -1043,6 +1043,159 @@
 
 ---
 
+## Phase 7 — Security Hardening (v0.1.3 patch, added 2026-05-20 11:35)
+
+> Source: [`instruction/security-review.md`](../security-review.md). Each task closes one or more findings from the audit. All 8 tasks together = v0.1.3 release.
+
+### Task: [TASK-035] Fix `ci.yml` workflow-level write permission
+
+- **Status:** ⚪ pending
+- **Priority:** high
+- **Parallel:** no (touches the file every other CI task touches)
+- **Assigned:** unassigned
+- **Depends on:** -
+- **Skills:** `git-commit`, `git-push`
+- **Files:** `.github/workflows/ci.yml`
+- **Subtasks:**
+  - [ ] implement: drop workflow-level `security-events: write`; add it to the `verify` job only (where gitleaks runs)
+  - [ ] verify: push a no-op commit; confirm gitleaks step still uploads SARIF (`gitleaks-results.sarif.zip` artifact exists)
+  - [ ] verify: SonarCloud re-scans, `S8233` finding closed (Security rating C → A)
+- **Progress Notes:**
+  - 2026-05-20 11:35 — Task created (closes security-review §1.1)
+
+---
+
+### Task: [TASK-036] Add `localeCompare` comparator to 7 sort sites
+
+- **Status:** ⚪ pending
+- **Priority:** medium
+- **Parallel:** yes (independent files)
+- **Assigned:** unassigned
+- **Depends on:** -
+- **Skills:** `git-commit`
+- **Files:** `workers/api/src/rules/filter.ts:146`, `workers/api/src/rules/index.test.ts:99-100`, `workers/api/test/campaigns.route.test.ts:116,148`, `workers/api/test/missions.route.test.ts:167`
+- **Subtasks:**
+  - [ ] implement: replace `arr.sort()` with `arr.sort((a, b) => a.localeCompare(b))` at all 7 sites
+  - [ ] verify: 165 worker-api tests stay green
+  - [ ] verify: SonarCloud Reliability rating D → A (closes the 7 `S2871` bugs)
+- **Progress Notes:**
+  - 2026-05-20 11:35 — Task created (closes security-review §2.3)
+
+---
+
+### Task: [TASK-037] Mark 8 SonarCloud false positives as Won't Fix
+
+- **Status:** ⚪ pending
+- **Priority:** low
+- **Parallel:** yes
+- **Assigned:** unassigned
+- **Depends on:** TASK-035 (so re-scan after that lands)
+- **Skills:** - (SonarCloud UI work)
+- **Files:** none (UI triage)
+- **Subtasks:**
+  - [ ] user-runs: in SonarCloud UI, mark as Won't Fix with the rationale from `security-review.md` §2.1-2.5:
+    - 3 `S5852` ReDoS hotspots on base64url char-class regex
+    - 4 `S2245` `Math.random` hotspots (defensive fallbacks / non-security UI use)
+    - 1 `S6440` React `use` hook in Playwright fixture
+- **Progress Notes:**
+  - 2026-05-20 11:35 — Task created (closes security-review §2.1, §2.2, §2.4)
+
+---
+
+### Task: [TASK-038] Pin all GH Actions to commit SHAs
+
+- **Status:** ⚪ pending
+- **Priority:** low
+- **Parallel:** yes (file overlap with TASK-035 only)
+- **Assigned:** unassigned
+- **Depends on:** TASK-035 (avoid merge conflict on ci.yml)
+- **Skills:** `git-commit`
+- **Files:** `.github/workflows/ci.yml`
+- **Subtasks:**
+  - [ ] implement: pin `actions/checkout@<sha>  # v5`, `actions/setup-node@<sha>  # v5`, `pnpm/action-setup@<sha>  # v5`, `gitleaks/gitleaks-action@<sha>  # v2`, `actions/upload-artifact@<sha>  # v4` — keep the tag in trailing comment so dependabot still proposes bumps
+  - [ ] verify: CI runs to completion with pinned SHAs (lint + Newman both pass)
+  - [ ] verify: SonarCloud `S7637` finding closed (2 instances)
+- **Progress Notes:**
+  - 2026-05-20 11:35 — Task created (closes security-review §2.5)
+
+---
+
+### Task: [TASK-039] Document `gitleaks` install in `CONTRIBUTING.md`
+
+- **Status:** ⚪ pending
+- **Priority:** low
+- **Parallel:** yes
+- **Assigned:** unassigned
+- **Depends on:** -
+- **Skills:** -
+- **Files:** `CONTRIBUTING.md`
+- **Subtasks:**
+  - [ ] write: new section `## Pre-commit checks` covering: install via Homebrew / winget / scoop / `go install github.com/gitleaks/gitleaks/v8@latest`; how the husky pre-commit hook expects it; how to run `gitleaks detect --redact` manually before push
+  - [ ] verify: clone-from-fresh + follow the doc instructions; `gitleaks detect --no-banner` exits 0
+- **Progress Notes:**
+  - 2026-05-20 11:35 — Task created (closes security-review §3.12 last row)
+
+---
+
+### Task: [TASK-040] Redact user-ids from `console.warn` calls
+
+- **Status:** ⚪ pending
+- **Priority:** low
+- **Parallel:** yes
+- **Assigned:** unassigned
+- **Depends on:** -
+- **Skills:** `git-commit`
+- **Files:** `workers/api/src/services/ingest.ts`, `workers/api/src/routes/missions.ts`, `apps/demo/src/lib/useMissionClaim.ts`, `packages/core/src/sse.ts`, `packages/core/src/polling.ts`
+- **Subtasks:**
+  - [ ] implement: replace embedded user-id strings with `redactId(userId)` — keep first 4 chars + `…` + last 2 chars (helps debugging without leaking the full ID)
+  - [ ] implement: small helper `redactId` in `workers/api/src/util/redact.ts` exported for use across api routes; mirror in demo if needed
+  - [ ] test: new unit test `workers/api/test/log-redaction.test.ts` — capture `console.warn`, run a synthetic claim-failure path, assert no full user-id string appears in any captured message
+  - [ ] verify: lint + typecheck stays green
+- **Progress Notes:**
+  - 2026-05-20 11:35 — Task created (closes security-review §3.8 A3)
+
+---
+
+### Task: [TASK-041] Cookie-based auth fallback in `requireAuth` (with CSRF guard)
+
+- **Status:** ⚪ pending
+- **Priority:** low
+- **Parallel:** no (depends on new tests + docs)
+- **Assigned:** unassigned
+- **Depends on:** TASK-040 (avoids merge conflicts in api routes)
+- **Skills:** `git-commit`
+- **Files:** `workers/api/src/auth/middleware.ts`, `workers/api/test/auth-cookie.test.ts` (new), `apps/docs/docs/api/auth.md`
+- **Subtasks:**
+  - [ ] implement: if `Authorization: Bearer …` header is absent, fall back to reading `qk_token` cookie. Either succeeds → proceed; neither → 401.
+  - [ ] implement: CSRF guard — when token comes from cookie, require either (a) `Origin` matches a host allowlist (configurable via `c.env.ALLOWED_ORIGINS`) OR (b) a custom header `X-Requested-With: qk` present. Otherwise reject 401.
+  - [ ] test: new unit `auth-cookie.test.ts` — 5 scenarios per security-review §11.5
+  - [ ] document: add new section in `apps/docs/docs/api/auth.md` "Cookie-based auth (browser hosts)"
+  - [ ] verify: backwards compat — existing Bearer-header callers (Newman, demo, e2e) keep working unchanged
+- **Progress Notes:**
+  - 2026-05-20 11:35 — Task created (closes security-review §3.1 A1)
+
+---
+
+### Task: [TASK-042] Wire up `lcov.info` coverage upload to SonarCloud
+
+- **Status:** ⚪ pending
+- **Priority:** low
+- **Parallel:** no
+- **Assigned:** unassigned
+- **Depends on:** TASK-035 (final CI shape)
+- **Skills:** `git-commit`
+- **Files:** Per-package `vitest.config.ts` / `jest.config.cjs` (5 packages), `.github/workflows/ci.yml`, possibly switching SonarCloud back to CI-based mode
+- **Subtasks:**
+  - [ ] decide: keep SonarCloud Auto Analysis (no LCOV upload possible) OR switch back to CI-based scanning so we can publish coverage. Document the decision in the task progress notes
+  - [ ] if CI-based chosen: re-enable the `sonarcloud` job in `ci.yml`, gated on `SONAR_TOKEN`; disable Auto Analysis in SonarCloud UI
+  - [ ] implement: enable `coverage: { reporter: ['lcov', 'text-summary'] }` in each test config; aggregate per-package LCOVs into a single `coverage/lcov.info` at repo root (via a small script if needed)
+  - [ ] implement: add `Coverage` step in CI that runs `pnpm test:coverage` and uploads `coverage/lcov.info` as a workflow artifact + (if CI-based) attaches to the sonar scan step
+  - [ ] verify: SonarCloud Coverage metric stops reporting 0 and shows real percentage
+- **Progress Notes:**
+  - 2026-05-20 11:35 — Task created (closes security-review §5)
+
+---
+
 ## File Lock Registry
 
 | File                                                                                                          | Locked by           | Task          | Since                                                                     |

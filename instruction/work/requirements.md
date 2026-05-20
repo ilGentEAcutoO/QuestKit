@@ -69,3 +69,22 @@ the authoritative spec for QuestKit. All planning derives from that file.
 - Docusaurus 3 for docs (JD requirement).
 - Zero secrets in git history, ever.
 - 6-day build (Phases 1–6, one phase per "day").
+
+---
+
+## Security Hardening (added 2026-05-20 11:35)
+
+Original user request (exact wording):
+
+> "/security-review all apps not just latest dependency all sonarcloud that found. replace report in @instruction/security-review.md"
+> "/workflow-plan fix all @instruction/security-review.md found"
+
+Interpretation: produce a comprehensive security audit covering ALL
+surfaces (apps + packages + workers + CI + dependencies), not just the
+diff-with-last-deploy; include every SonarCloud finding (bugs +
+vulnerabilities + hotspots + critical smells); write it to
+`instruction/security-review.md` (replacing any prior). Then create a
+plan that fixes every actionable finding.
+
+Audit committed `86e7acb`. Plan covers 8 tasks (TASK-035 to TASK-042)
+addressing the 1 MEDIUM + ~13 LOW + several INFO findings.

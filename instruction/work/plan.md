@@ -570,3 +570,121 @@ Five gaps surfaced by `docs-content-writer` during TASK-027 are resolved here. T
 | TASK-033         | user + agent    | Agent drafts README; user records 60s screencap GIF + 1280×640 social card.                                                                  |
 | TASK-034         | user + agent    | Agent runs verification matrix; user creates `git tag v0.1.0` + GitHub Release.                                                              |
 | User reminder    | **user only**   | Register `QUESTKIT_APP_SECRET` in GitHub Settings → Secrets → Actions (Newman CI blocked since Phase 2).                                     |
+
+---
+
+> Added: 2026-05-20 11:35 — Security Hardening (v0.1.3 patch)
+
+## 11. Security Hardening — fix all findings from `instruction/security-review.md`
+
+### 11.1 Source
+
+Full audit lives in [`instruction/security-review.md`](./security-review.md)
+(committed `86e7acb`). Risk matrix: **0 HIGH, 1 MEDIUM, ~13 LOW, ~100+ INFO**.
+Net of false positives, the remediation plan below addresses **every
+finding** the auditor flagged as worth addressing.
+
+Goal of this phase: ship **v0.1.3** with SonarCloud security rating
+flipped from **C → A**, reliability rating from **D → A** (default
+sort fixes), and no real residual vulnerabilities.
+
+### 11.2 Requirements
+
+|                  |                                                                                                                                                                                                                                          |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Must-fix         | §1.1 — workflow `security-events: write` moves to job-level grant                                                                                                                                                                        |
+| Should-fix       | §2.3 — close 7 `S2871` sort comparator findings ; §2.1/2.2/2.4 — mark 8 false-positive hotspots as "Won't Fix" in SonarCloud UI ; §3.8 A3 — redact user-ids in `console.warn` ; §3.12 — document `gitleaks` install in `CONTRIBUTING.md` |
+| Nice-to-have     | §2.5 — pin all GH Actions to commit SHA ; §3.1 A1 — optional cookie-based auth path in `requireAuth` ; §5 — wire up `lcov.info` upload to SonarCloud so the coverage metric stops reporting 0                                            |
+| Deferred to v0.2 | Multi-provider webhook normaliser (plan A27 follow-up) — out of scope for v0.1.3                                                                                                                                                         |
+
+### 11.3 Architecture
+
+No new modules. The hardening is a sequence of small surgical edits:
+
+1. `.github/workflows/ci.yml` — relocate `security-events: write` to the
+   `verify` job; drop the workflow-level grant; pin all third-party
+   actions (`actions/checkout`, `actions/setup-node`, `pnpm/action-setup`,
+   `gitleaks/gitleaks-action`, `actions/upload-artifact`) to commit
+   SHAs with version comments.
+2. `workers/api/src/db/schema.ts:636`, `workers/api/src/rules/filter.ts`,
+   plus 5 test files — add explicit `.sort((a, b) => a.localeCompare(b))`
+   to close S2871. Tests update string-array expectations to use the
+   same comparator.
+3. SonarCloud UI — mark `S5852` (x3), `S2245` (x4), `S6440` (x1),
+   `S7637` (x2 — moot after #1) as "Won't Fix" or "Safe" with the
+   rationale from the security review.
+4. `workers/api/src/services/ingest.ts`, `workers/api/src/routes/missions.ts`,
+   `apps/demo/src/routes/ecommerce.tsx`, `packages/core/src/sse.ts` —
+   redact user-id and mission-id from `console.warn`/`console.error`
+   messages (replace with `<userId redacted>` token or hash prefix).
+5. `CONTRIBUTING.md` — add a `## Pre-commit checks` section documenting
+   how to install `gitleaks` (Homebrew + winget + scoop + go-install),
+   what the pre-commit hook expects, and how to run gitleaks manually.
+6. `workers/api/src/auth/middleware.ts` — add a cookie fallback alongside
+   the `Authorization: Bearer` header (read `qk_token` cookie if header
+   absent). Document the new flow in `apps/docs/docs/api/auth.md`.
+7. `vitest.config.ts` for each worker + `jest.config.ts` for each
+   package — enable coverage reporters (`lcov`, `text-summary`). Add
+   `Coverage` step in CI that runs `pnpm test:coverage` then uploads
+   `coverage/lcov.info` to SonarCloud (no SonarCloud CI job needed —
+   Auto Analysis ingests LCOV from the GH artifact via Sonar's webhook
+   if exposed; simpler path: switch SonarCloud back to CI-based with
+   coverage attached, OR leave Auto Analysis on and accept "coverage
+   unreported"). Decide during research phase.
+
+### 11.4 Security Considerations
+
+Each finding-fix has its own security dimension:
+
+- **#1 (workflow permission):** Reduces blast radius if any third-party
+  action is later compromised — the lint/typecheck/Newman jobs no
+  longer carry write access to Code Scanning. **Direct security win.**
+- **#3 (Sonar Won't Fix):** No code change → no new risk surface. Just
+  housekeeping for badge cleanliness.
+- **#4 (PII redaction in logs):** Reduces incidental PII landing in
+  `wrangler tail` / Workers logs. **GDPR-friendly default.**
+- **#5 (`gitleaks` docs):** Defence-in-depth — contributors catch
+  secret leaks at commit time, not just at CI time.
+- **#6 (cookie auth):** Wider compatibility with HttpOnly-cookie hosts.
+  Must preserve the Bearer-header path for backwards compatibility;
+  cookie is an OR, not an XOR. Watch out for **CSRF** — when accepting
+  cookies, must require `Origin` allowlist OR a custom header that
+  preflighted requests carry. Will design + test before landing.
+- **#7 (coverage upload):** No new attack surface — coverage data is
+  not security-sensitive. Trickiest part is plumbing without breaking
+  CI.
+
+### 11.5 Test Specifications (TDD)
+
+#### Unit / integration tests to add
+
+| Task                       | Test                                                                                                                                                                                                                                        |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| TASK-035 (workflow perm)   | No unit test — config-only. Validation: re-run any push and confirm `gitleaks` still uploads SARIF (job-level `security-events: write` works).                                                                                              |
+| TASK-036 (sort comparator) | The existing string-array assertions already verify deterministic order; just keep them green after switching comparator.                                                                                                                   |
+| TASK-037 (Sonar Won't Fix) | No test — UI-only triage. SonarCloud's "issues by status" filter confirms 8 hotspots / 7 bugs in "Won't Fix".                                                                                                                               |
+| TASK-038 (SHA pins)        | `actionlint` workflow lint (CI gate). Optional.                                                                                                                                                                                             |
+| TASK-039 (gitleaks docs)   | No test. Manual: a new clone + `gitleaks detect` from the doc instructions exits 0.                                                                                                                                                         |
+| TASK-040 (log redaction)   | **New unit test** `workers/api/test/log-redaction.test.ts` — capture `console.warn` while running a synthetic claim that fails; assert no full user-id string appears in any captured message.                                              |
+| TASK-041 (cookie auth)     | **New worker route test** `workers/api/test/auth-cookie.test.ts` — three cases: (a) only header → 200, (b) only cookie → 200, (c) both, mismatched → header wins, (d) neither → 401, (e) cookie + missing Origin header → 401 (CSRF guard). |
+| TASK-042 (coverage upload) | CI gate: existence of `coverage/lcov.info` after `pnpm test:coverage`. No assertions on coverage percentage in this task (gates come later).                                                                                                |
+
+#### E2E
+
+No new Playwright spec — the golden-path spec stays the canonical end-to-end gate. Hardening tasks above are unit-level or config-level.
+
+### 11.6 Tasks
+
+| ID       | Name                                                          | Priority | Parallel | Depends                      |
+| -------- | ------------------------------------------------------------- | -------- | -------- | ---------------------------- |
+| TASK-035 | Fix `ci.yml` workflow-level write permission                  | high     | no       | —                            |
+| TASK-036 | Add `localeCompare` comparator to 7 sort sites                | medium   | yes      | —                            |
+| TASK-037 | Mark 8 SonarCloud false positives as Won't Fix                | low      | yes      | TASK-035 (re-scan after fix) |
+| TASK-038 | Pin all GH Actions to commit SHAs                             | low      | yes      | TASK-035 (touches same file) |
+| TASK-039 | Document `gitleaks` install in `CONTRIBUTING.md`              | low      | yes      | —                            |
+| TASK-040 | Redact user-ids from `console.warn` calls                     | low      | yes      | —                            |
+| TASK-041 | Add cookie-based auth path to `requireAuth` (with CSRF guard) | low      | no       | new tests                    |
+| TASK-042 | Wire up `lcov.info` coverage upload to SonarCloud             | low      | no       | TASK-035 (CI structure)      |
+
+Phase target: all 8 tasks merged → tag **v0.1.3** with CHANGELOG entry
+"Security Hardening", SonarCloud Security rating C → A, Reliability D → A.
