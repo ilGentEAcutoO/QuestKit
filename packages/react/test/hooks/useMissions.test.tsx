@@ -408,12 +408,10 @@ describe("useMissions", () => {
       };
       let pushOptimistic: ((ids: string[]) => void) | null = null;
       const client = makeFakeClient({
-        getMissions: jest
-          .fn()
-          .mockResolvedValue({
-            missions: [mission1],
-            progress: { m1: oneAway },
-          }),
+        getMissions: jest.fn().mockResolvedValue({
+          missions: [mission1],
+          progress: { m1: oneAway },
+        }),
         onFireEventSuccess: jest
           .fn()
           .mockImplementation((cb: (ids: string[]) => void) => {
@@ -446,6 +444,81 @@ describe("useMissions", () => {
       await waitFor(() => expect(result.current.isSuccess).toBe(true));
       unmount();
       expect(unsubFireEvent).toHaveBeenCalledTimes(1);
+    });
+
+    // Regression: when optimistic state has advanced past an in-flight SSE
+    // delivery, the SSE merge MUST be monotonic on currentCount or the user
+    // sees the counter snap backwards (e.g. 3 → 2 → 3). See the merge
+    // policy docblock at the top of useMissions.ts.
+    it("does not let mission.progress SSE lower currentCount below optimistic state (monotonic merge)", async () => {
+      const zero: MissionProgress = {
+        ...progress1,
+        currentCount: 0,
+        progress: 0,
+      };
+      let pushSse: ((u: SDKUpdate) => void) | null = null;
+      let pushOptimistic: ((ids: string[]) => void) | null = null;
+      const client = makeFakeClient({
+        getMissions: jest
+          .fn()
+          .mockResolvedValue({ missions: [mission1], progress: { m1: zero } }),
+        subscribe: jest
+          .fn()
+          .mockImplementation((cb: (u: SDKUpdate) => void) => {
+            pushSse = cb;
+            return jest.fn();
+          }),
+        onFireEventSuccess: jest
+          .fn()
+          .mockImplementation((cb: (ids: string[]) => void) => {
+            pushOptimistic = cb;
+            return jest.fn();
+          }),
+      });
+      const { result } = renderHook(() => useMissions(), {
+        wrapper: wrapperWith(client),
+      });
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+      // Fire two optimistic bumps back-to-back → currentCount goes 0 → 2.
+      act(() => pushOptimistic?.(["m1"]));
+      act(() => pushOptimistic?.(["m1"]));
+      expect(result.current.data?.progress.m1?.currentCount).toBe(2);
+
+      // SSE for event #1 arrives late with currentCount: 1 (below optimistic).
+      // Monotonic guard must hold the counter at 2.
+      const lateSse1: MissionProgress = {
+        ...zero,
+        currentCount: 1,
+        progress: 0.2,
+        updatedAt: 100,
+      };
+      act(() => pushSse?.({ type: "mission.progress", data: lateSse1 }));
+      expect(result.current.data?.progress.m1?.currentCount).toBe(2);
+      // Authoritative non-count fields still come through.
+      expect(result.current.data?.progress.m1?.updatedAt).toBe(100);
+
+      // SSE for event #2 arrives with currentCount: 2 (caught up). No change.
+      const lateSse2: MissionProgress = {
+        ...zero,
+        currentCount: 2,
+        progress: 0.4,
+        updatedAt: 200,
+      };
+      act(() => pushSse?.({ type: "mission.progress", data: lateSse2 }));
+      expect(result.current.data?.progress.m1?.currentCount).toBe(2);
+      expect(result.current.data?.progress.m1?.updatedAt).toBe(200);
+
+      // Server overshoots (e.g. another event fired elsewhere) — accept it.
+      const sseAhead: MissionProgress = {
+        ...zero,
+        currentCount: 5,
+        progress: 1,
+        updatedAt: 300,
+      };
+      act(() => pushSse?.({ type: "mission.progress", data: sseAhead }));
+      expect(result.current.data?.progress.m1?.currentCount).toBe(5);
+      expect(result.current.data?.progress.m1?.updatedAt).toBe(300);
     });
   });
 });

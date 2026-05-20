@@ -535,6 +535,9 @@ export class QuestKitClient {
    * full progress numbers — for those, use `subscribe()` and watch the
    * `mission.progress` SDKUpdate).
    *
+   * Dispatch fires synchronously before `fireEvent` resolves; listeners
+   * run on the same microtask as the server response parse.
+   *
    * Used by the React `useMissions` hook to optimistically bump
    * `currentCount` immediately, so the UI feels responsive even when SSE
    * is degraded (proxy timeout, network flakiness, etc.). The eventual

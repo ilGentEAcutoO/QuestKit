@@ -14,15 +14,19 @@ import { QuestKitError } from "@questkit/core";
  * If a campaign curator updates a mission server-side, the consumer must
  * call `refetch()`.
  *
- * Dedupe / overlap policy (TASK-006):
- *   When `fireEvent` succeeds, the server returns `missionsUpdated: string[]`
- *   (mission IDs that progressed) — but NOT the new currentCount. We
- *   optimistically increment local `currentCount` by 1, clamped at
- *   `targetCount`. SSE later delivers the authoritative `mission.progress`
- *   update for the same mission, and that overwrites the optimistic state
- *   (last-writer-wins; the SSE merge above is unconditional). If SSE is
- *   degraded, the optimistic state is what the user sees — that's the whole
- *   point of this path.
+ * Merge policy (TASK-006):
+ *   - SSE `mission.progress`: monotonic on `currentCount` (Math.max with
+ *     prev), authoritative on every other field (`status`, `claimedAt`,
+ *     `updatedAt`, `progress`, …). This prevents a visible counter
+ *     regression when the user fires several events back-to-back: the
+ *     optimistic state may already be ahead of the first SSE delivery for
+ *     event #1, and we must not snap it back to a lower number.
+ *   - SSE `mission.completed`: unconditional overwrite. Completion is a
+ *     terminal state and we want it to land immediately.
+ *   - Optimistic merge (`onFireEventSuccess`): still `currentCount + 1`,
+ *     clamped at `targetCount`. The next authoritative SSE / refetch
+ *     reconciles via the monotonic rule above (last-writer-wins on
+ *     non-count fields, max on count).
  *
  *   This can briefly drift by ±1 if the user fires several events quickly
  *   and the server's `mission.progress` for one of them arrives late, but
@@ -91,9 +95,32 @@ export function useMissions(
       const p = update.data;
       setData((prev) => {
         if (prev === undefined) return prev;
+        const existing = prev.progress[p.missionId];
+        // mission.completed is terminal — unconditional overwrite so the
+        // completion state lands immediately even if it would lower a count
+        // (shouldn't happen server-side, but we never block a completion).
+        if (update.type === "mission.completed" || existing === undefined) {
+          return {
+            ...prev,
+            progress: { ...prev.progress, [p.missionId]: p },
+          };
+        }
+        // mission.progress: monotonic on currentCount to prevent a visible
+        // regression when optimistic state is already ahead of an in-flight
+        // SSE delivery. Every other field is authoritative — server is the
+        // source of truth for status / claimedAt / updatedAt / etc.
+        const merged: MissionProgress = {
+          ...p,
+          currentCount: Math.max(existing.currentCount, p.currentCount),
+        };
+        // Recompute the progress ratio so it matches the (possibly held-up)
+        // currentCount rather than the server's lower value.
+        if (merged.targetCount > 0) {
+          merged.progress = merged.currentCount / merged.targetCount;
+        }
         return {
           ...prev,
-          progress: { ...prev.progress, [p.missionId]: p },
+          progress: { ...prev.progress, [p.missionId]: merged },
         };
       });
     });
@@ -136,6 +163,8 @@ export function useMissions(
               reachedTarget && existing.status === "active"
                 ? "completed"
                 : existing.status,
+            // updatedAt is monotonic — guard against existing server-side
+            // timestamps being in our future (clock skew).
             updatedAt: Math.max(existing.updatedAt, now),
           };
           nextProgress[id] = updated;
