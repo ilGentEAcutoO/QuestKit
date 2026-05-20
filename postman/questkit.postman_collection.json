@@ -689,12 +689,12 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('200 OK', () => pm.response.to.have.status(200));",
-                  "pm.test('campaign.id matches + missionIds length 3', () => {",
+                  "pm.test('campaign.id matches + missionIds length 6', () => {",
                   "  const j = pm.response.json();",
                   "  pm.expect(j.campaign).to.be.an('object');",
                   "  pm.expect(j.campaign.id).to.equal('camp_ecom_2026q2');",
                   "  pm.expect(j.campaign.missionIds).to.be.an('array');",
-                  "  pm.expect(j.campaign.missionIds.length).to.equal(3);",
+                  "  pm.expect(j.campaign.missionIds.length).to.equal(6);",
                   "});"
                 ]
               }
