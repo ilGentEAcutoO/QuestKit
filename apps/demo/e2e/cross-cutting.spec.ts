@@ -55,7 +55,7 @@ test.describe("Cross-cutting — global UI surfaces", () => {
     expect(panelText).not.toMatch(/ai_response_malformed/i);
     expect(panelText).not.toMatch(/\b502\b/);
     expect(panelText).not.toMatch(/\b503\b/);
-    expect(panelText).not.toMatch(/Couldn't load recommendations/i);
+    expect(panelText).not.toMatch(/load recommendations/i);
 
     expect(consoleErrors).toEqual([]);
   });

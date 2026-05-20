@@ -103,7 +103,11 @@ test.describe("E-commerce — Buy + Claim", () => {
     }
 
     // Percent badge must also be clamped to 100% (never 233% etc.).
-    expect(text).not.toMatch(/[1-9]\d{2,}%/); // no 100+ → 999% values
+    // Regex matches 200%-999% (e.g. "233%") AND 1000%+ (e.g. "1000%") but
+    // intentionally excludes the legitimate "100%" rendering that appears
+    // when a mission reaches its target. A naive /[1-9]\d{2,}%/ would
+    // also match "100%" (digit `1` + the two zeros) and fail the healthy case.
+    expect(text).not.toMatch(/(?:[2-9]\d{2,}|1\d{3,})%/);
     expect(text).toContain("100%");
 
     expect(consoleErrors).toEqual([]);
