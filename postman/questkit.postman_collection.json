@@ -720,10 +720,10 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('200 OK', () => pm.response.to.have.status(200));",
-                  "pm.test('missions[] hydrated, length 3', () => {",
+                  "pm.test('missions[] hydrated, length 6', () => {",
                   "  const j = pm.response.json();",
                   "  pm.expect(j.missions, 'hydrated missions array').to.be.an('array');",
-                  "  pm.expect(j.missions.length).to.equal(3);",
+                  "  pm.expect(j.missions.length).to.equal(6);",
                   "});"
                 ]
               }
