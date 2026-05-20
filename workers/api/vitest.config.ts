@@ -84,7 +84,7 @@ export default defineConfig({
       // Pool-workers only supports istanbul (v8 is not allowed inside workerd
       // — confirmed by the runtime check in dist/pool/index.mjs).
       provider: "istanbul",
-      reporter: ["text", "json-summary"],
+      reporter: ["text", "json-summary", "lcov"],
       include: ["src/**/*.ts"],
       exclude: [
         "src/**/*.d.ts",

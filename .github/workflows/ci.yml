@@ -73,24 +73,60 @@ jobs:
         run: pnpm audit --prod --audit-level=high
         continue-on-error: true
 
-  # ---------------------------------------------------------------------------
-  # SonarCloud (note for future contributors):
-  #
-  # No SonarCloud job is wired into CI on purpose. SonarCloud is set up to
-  # use its **Automatic Analysis** mode (the default after importing the
-  # repo), which scans every push from sonarcloud.io's side without any
-  # CI-side action. The README quality-gate badge is driven directly off
-  # those Auto Analysis results.
-  #
-  # If a future contributor wants CI-based analysis (e.g. for monorepo
-  # coverage merging or custom scanner properties), they must FIRST disable
-  # Automatic Analysis at:
-  #   https://sonarcloud.io/project/analysis_method?id=ilGentEAcutoO_QuestKit
-  # SonarCloud rejects CI scans while Auto Analysis is active with:
-  #   "ERROR You are running CI analysis while Automatic Analysis is enabled"
-  # Then add a sonarcloud job here using SonarSource/sonarqube-scan-action@v6
-  # (v5 has the GHSA-5xq9-5g24-4g6f argument-injection advisory).
-  # ---------------------------------------------------------------------------
+  sonarcloud:
+    name: SonarCloud scan with coverage
+    runs-on: ubuntu-latest
+    needs: [verify]
+    # PRs from forks cannot read SONAR_TOKEN; only run on push to main and
+    # internal PRs (head_repository == base_repository).
+    if: github.event_name == 'push' || (github.event.pull_request && github.event.pull_request.head.repo.full_name == github.repository)
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0 # Sonar needs full history for blame
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.27.0
+          run_install: false
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate wrangler types
+        run: |
+          pnpm --filter @questkit/worker-api cf-typegen
+          pnpm --filter @questkit/worker-webhook-relay cf-typegen
+          pnpm --filter @questkit/worker-webhook-consumer cf-typegen
+
+      - name: Run coverage
+        run: pnpm test:coverage
+
+      - name: Upload coverage artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: coverage-lcov
+          path: |
+            workers/*/coverage/lcov.info
+            packages/*/coverage/lcov.info
+
+      - name: SonarCloud scan
+        uses: SonarSource/sonarqube-scan-action@fd88b7d7ccbaefd23d8f36f73b59db7a3d246602 # v6
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   newman:
     name: Newman API contract tests

@@ -477,6 +477,9 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 20.19.41
+      '@vitest/coverage-istanbul':
+        specifier: ^4.1.6
+        version: 4.1.6(vitest@4.1.6)
       typescript:
         specifier: 'catalog:'
         version: 5.8.3
@@ -505,6 +508,9 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 20.19.41
+      '@vitest/coverage-istanbul':
+        specifier: ^4.1.6
+        version: 4.1.6(vitest@4.1.6)
       typescript:
         specifier: 'catalog:'
         version: 5.8.3

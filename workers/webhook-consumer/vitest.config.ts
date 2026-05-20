@@ -24,7 +24,7 @@ export default defineConfig({
     coverage: {
       // Pool-workers only supports istanbul (v8 is not allowed inside workerd).
       provider: "istanbul",
-      reporter: ["text", "json-summary"],
+      reporter: ["text", "json-summary", "lcov"],
       include: ["src/**/*.ts"],
       exclude: [
         "src/**/*.d.ts",
