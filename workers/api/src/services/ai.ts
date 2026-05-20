@@ -73,22 +73,6 @@ export function cacheKey(userId: string): string {
 }
 
 /**
- * Thrown when the AI returned a response we cannot parse / validate.
- *
- * Phase 8 / v0.1.4: the public path (`recommendMissions`) no longer throws
- * this — it catches internally and returns a fallback `RecommendationsResult`.
- * The class is kept exported for backward compatibility (the route handler's
- * catch block still references it for defensive logging) and for any future
- * non-public call sites that might still want a thrown variant.
- */
-export class AiResponseError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "AiResponseError";
-  }
-}
-
-/**
  * Result returned to the route layer.
  *
  * `fallback: true` indicates the AI call failed (malformed response, etc.) and
@@ -140,10 +124,9 @@ function fallbackResult(): RecommendationsResult {
  * Validate the parsed JSON shape. Returns the typed payload on success,
  * returns `null` on any structural defect (caller surfaces a fallback).
  *
- * Phase 8 / v0.1.4: previously threw `AiResponseError`. Switched to a
- * null-return so the caller can compose multiple parse strategies (try the
- * `.response` string, then `.result`, then raw) without each one having to
- * catch.
+ * Phase 8 / v0.1.4: previously threw a typed error. Switched to a null-return
+ * so the caller can compose multiple parse strategies (try the `.response`
+ * string, then `.result`, then raw) without each one having to catch.
  */
 function validateAiPayload(raw: unknown): AiPayload | null {
   if (typeof raw !== "object" || raw === null) return null;
