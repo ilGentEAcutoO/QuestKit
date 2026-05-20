@@ -141,12 +141,10 @@ describe("useMissions", () => {
   it("patches progress on mission.completed SSE", async () => {
     let push: ((u: SDKUpdate) => void) | null = null;
     const client = makeFakeClient({
-      getMissions: jest
-        .fn()
-        .mockResolvedValue({
-          missions: [mission1],
-          progress: { m1: progress1 },
-        }),
+      getMissions: jest.fn().mockResolvedValue({
+        missions: [mission1],
+        progress: { m1: progress1 },
+      }),
       subscribe: jest.fn().mockImplementation((cb: (u: SDKUpdate) => void) => {
         push = cb;
         return jest.fn();
@@ -243,5 +241,284 @@ describe("useMissions", () => {
     });
     expect(result.current.data).toEqual(r2);
     expect(getMissions).toHaveBeenCalledTimes(2);
+  });
+
+  // TASK-006 — optimistic counter updates from fireEvent.
+  //
+  // The hook subscribes to `client.onFireEventSuccess`. When the SDK
+  // notifies it that one or more missions advanced server-side, the hook
+  // increments `currentCount` locally so the UI keeps moving even when SSE
+  // is degraded. Server-side SSE/refetch acts as the authoritative
+  // overwrite (last-writer-wins).
+  describe("optimistic updates from fireEvent (no SSE)", () => {
+    it("increments currentCount when onFireEventSuccess fires for a known mission", async () => {
+      let pushOptimistic: ((ids: string[]) => void) | null = null;
+      const response = {
+        missions: [mission1],
+        progress: { m1: progress1 },
+      };
+      const client = makeFakeClient({
+        getMissions: jest.fn().mockResolvedValue(response),
+        onFireEventSuccess: jest
+          .fn()
+          .mockImplementation((cb: (ids: string[]) => void) => {
+            pushOptimistic = cb;
+            return jest.fn();
+          }),
+      });
+      const { result } = renderHook(() => useMissions(), {
+        wrapper: wrapperWith(client),
+      });
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+      // Simulate fireEvent success while SSE is silent.
+      act(() => {
+        pushOptimistic?.(["m1"]);
+      });
+
+      const next = result.current.data?.progress.m1;
+      expect(next?.currentCount).toBe(progress1.currentCount + 1);
+      // progress ratio should reflect the new currentCount / targetCount.
+      expect(next?.progress).toBeCloseTo(
+        (progress1.currentCount + 1) / progress1.targetCount,
+        5,
+      );
+      // updatedAt should bump forward (optimistic timestamp).
+      expect(next?.updatedAt).toBeGreaterThanOrEqual(progress1.updatedAt);
+    });
+
+    it("clamps currentCount at targetCount (no overshoot)", async () => {
+      const near: MissionProgress = {
+        ...progress1,
+        currentCount: 4,
+        progress: 0.8,
+      };
+      let pushOptimistic: ((ids: string[]) => void) | null = null;
+      const client = makeFakeClient({
+        getMissions: jest
+          .fn()
+          .mockResolvedValue({ missions: [mission1], progress: { m1: near } }),
+        onFireEventSuccess: jest
+          .fn()
+          .mockImplementation((cb: (ids: string[]) => void) => {
+            pushOptimistic = cb;
+            return jest.fn();
+          }),
+      });
+      const { result } = renderHook(() => useMissions(), {
+        wrapper: wrapperWith(client),
+      });
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+      // First bump: 4 → 5 (== target).
+      act(() => pushOptimistic?.(["m1"]));
+      expect(result.current.data?.progress.m1?.currentCount).toBe(5);
+
+      // Second bump: clamp at 5, do not overshoot.
+      act(() => pushOptimistic?.(["m1"]));
+      expect(result.current.data?.progress.m1?.currentCount).toBe(5);
+    });
+
+    it("handles multiple mission ids in a single callback", async () => {
+      const mission2: Mission = { ...mission1, id: "m2" };
+      const progress2: MissionProgress = { ...progress1, missionId: "m2" };
+      let pushOptimistic: ((ids: string[]) => void) | null = null;
+      const client = makeFakeClient({
+        getMissions: jest.fn().mockResolvedValue({
+          missions: [mission1, mission2],
+          progress: { m1: progress1, m2: progress2 },
+        }),
+        onFireEventSuccess: jest
+          .fn()
+          .mockImplementation((cb: (ids: string[]) => void) => {
+            pushOptimistic = cb;
+            return jest.fn();
+          }),
+      });
+      const { result } = renderHook(() => useMissions(), {
+        wrapper: wrapperWith(client),
+      });
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+      act(() => pushOptimistic?.(["m1", "m2"]));
+
+      expect(result.current.data?.progress.m1?.currentCount).toBe(
+        progress1.currentCount + 1,
+      );
+      expect(result.current.data?.progress.m2?.currentCount).toBe(
+        progress2.currentCount + 1,
+      );
+    });
+
+    it("ignores unknown mission ids without throwing", async () => {
+      let pushOptimistic: ((ids: string[]) => void) | null = null;
+      const response = {
+        missions: [mission1],
+        progress: { m1: progress1 },
+      };
+      const client = makeFakeClient({
+        getMissions: jest.fn().mockResolvedValue(response),
+        onFireEventSuccess: jest
+          .fn()
+          .mockImplementation((cb: (ids: string[]) => void) => {
+            pushOptimistic = cb;
+            return jest.fn();
+          }),
+      });
+      const { result } = renderHook(() => useMissions(), {
+        wrapper: wrapperWith(client),
+      });
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+      act(() => pushOptimistic?.(["unknown-mission"]));
+
+      // Existing mission state is untouched.
+      expect(result.current.data?.progress.m1).toEqual(progress1);
+    });
+
+    it("does nothing before initial data has loaded", async () => {
+      let pushOptimistic: ((ids: string[]) => void) | null = null;
+      const client = makeFakeClient({
+        // Never resolves — data stays undefined.
+        getMissions: jest.fn().mockReturnValue(new Promise(() => {})),
+        onFireEventSuccess: jest
+          .fn()
+          .mockImplementation((cb: (ids: string[]) => void) => {
+            pushOptimistic = cb;
+            return jest.fn();
+          }),
+      });
+      const { result } = renderHook(() => useMissions(), {
+        wrapper: wrapperWith(client),
+      });
+
+      // Fire optimistic update before getMissions resolves — should be a noop.
+      expect(() => {
+        act(() => pushOptimistic?.(["m1"]));
+      }).not.toThrow();
+      expect(result.current.data).toBeUndefined();
+    });
+
+    it("flips status to completed once currentCount reaches targetCount", async () => {
+      const oneAway: MissionProgress = {
+        ...progress1,
+        currentCount: 4,
+        progress: 0.8,
+        status: "active",
+      };
+      let pushOptimistic: ((ids: string[]) => void) | null = null;
+      const client = makeFakeClient({
+        getMissions: jest.fn().mockResolvedValue({
+          missions: [mission1],
+          progress: { m1: oneAway },
+        }),
+        onFireEventSuccess: jest
+          .fn()
+          .mockImplementation((cb: (ids: string[]) => void) => {
+            pushOptimistic = cb;
+            return jest.fn();
+          }),
+      });
+      const { result } = renderHook(() => useMissions(), {
+        wrapper: wrapperWith(client),
+      });
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+      act(() => pushOptimistic?.(["m1"]));
+
+      expect(result.current.data?.progress.m1?.currentCount).toBe(5);
+      expect(result.current.data?.progress.m1?.status).toBe("completed");
+    });
+
+    it("unsubscribes the optimistic listener on unmount", async () => {
+      const unsubFireEvent = jest.fn();
+      const client = makeFakeClient({
+        getMissions: jest
+          .fn()
+          .mockResolvedValue({ missions: [], progress: {} }),
+        onFireEventSuccess: jest.fn().mockReturnValue(unsubFireEvent),
+      });
+      const { unmount, result } = renderHook(() => useMissions(), {
+        wrapper: wrapperWith(client),
+      });
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+      unmount();
+      expect(unsubFireEvent).toHaveBeenCalledTimes(1);
+    });
+
+    // Regression: when optimistic state has advanced past an in-flight SSE
+    // delivery, the SSE merge MUST be monotonic on currentCount or the user
+    // sees the counter snap backwards (e.g. 3 → 2 → 3). See the merge
+    // policy docblock at the top of useMissions.ts.
+    it("does not let mission.progress SSE lower currentCount below optimistic state (monotonic merge)", async () => {
+      const zero: MissionProgress = {
+        ...progress1,
+        currentCount: 0,
+        progress: 0,
+      };
+      let pushSse: ((u: SDKUpdate) => void) | null = null;
+      let pushOptimistic: ((ids: string[]) => void) | null = null;
+      const client = makeFakeClient({
+        getMissions: jest
+          .fn()
+          .mockResolvedValue({ missions: [mission1], progress: { m1: zero } }),
+        subscribe: jest
+          .fn()
+          .mockImplementation((cb: (u: SDKUpdate) => void) => {
+            pushSse = cb;
+            return jest.fn();
+          }),
+        onFireEventSuccess: jest
+          .fn()
+          .mockImplementation((cb: (ids: string[]) => void) => {
+            pushOptimistic = cb;
+            return jest.fn();
+          }),
+      });
+      const { result } = renderHook(() => useMissions(), {
+        wrapper: wrapperWith(client),
+      });
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+      // Fire two optimistic bumps back-to-back → currentCount goes 0 → 2.
+      act(() => pushOptimistic?.(["m1"]));
+      act(() => pushOptimistic?.(["m1"]));
+      expect(result.current.data?.progress.m1?.currentCount).toBe(2);
+
+      // SSE for event #1 arrives late with currentCount: 1 (below optimistic).
+      // Monotonic guard must hold the counter at 2.
+      const lateSse1: MissionProgress = {
+        ...zero,
+        currentCount: 1,
+        progress: 0.2,
+        updatedAt: 100,
+      };
+      act(() => pushSse?.({ type: "mission.progress", data: lateSse1 }));
+      expect(result.current.data?.progress.m1?.currentCount).toBe(2);
+      // Authoritative non-count fields still come through.
+      expect(result.current.data?.progress.m1?.updatedAt).toBe(100);
+
+      // SSE for event #2 arrives with currentCount: 2 (caught up). No change.
+      const lateSse2: MissionProgress = {
+        ...zero,
+        currentCount: 2,
+        progress: 0.4,
+        updatedAt: 200,
+      };
+      act(() => pushSse?.({ type: "mission.progress", data: lateSse2 }));
+      expect(result.current.data?.progress.m1?.currentCount).toBe(2);
+      expect(result.current.data?.progress.m1?.updatedAt).toBe(200);
+
+      // Server overshoots (e.g. another event fired elsewhere) — accept it.
+      const sseAhead: MissionProgress = {
+        ...zero,
+        currentCount: 5,
+        progress: 1,
+        updatedAt: 300,
+      };
+      act(() => pushSse?.({ type: "mission.progress", data: sseAhead }));
+      expect(result.current.data?.progress.m1?.currentCount).toBe(5);
+      expect(result.current.data?.progress.m1?.updatedAt).toBe(300);
+    });
   });
 });

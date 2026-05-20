@@ -162,6 +162,18 @@ export class QuestKitClient {
   private polling: PollingClient | null = null;
   /** All consumer-side SDKUpdate listeners. One SSE -> many subscribers. */
   private readonly listeners = new Set<(u: SDKUpdate) => void>();
+  /**
+   * Listeners invoked after every *successful* `fireEvent` post (TASK-006).
+   * Used by the React `useMissions` hook to optimistically bump
+   * `currentCount` even when the SSE channel is degraded — see
+   * `dispatchFireEventSuccess`. These are distinct from `listeners` (which
+   * receive structured SDKUpdate events from SSE/polling) because the
+   * optimistic path doesn't have authoritative progress numbers, only the
+   * list of mission IDs the server says advanced.
+   */
+  private readonly fireEventSuccessListeners = new Set<
+    (missionsUpdated: string[]) => void
+  >();
   /** Set on destroy() so post-destroy calls fail-fast. */
   private destroyed = false;
 
@@ -304,52 +316,14 @@ export class QuestKitClient {
     };
 
     // Try once immediately; on transient failure, enqueue + return queued.
-    // A request-timeout is treated identically to any other network failure:
-    // the event is durable in the queue and the background flush will
-    // retry — the caller's `isFiring` flag clears via the resolved promise.
-    const sendFn: SendFn = async (e): Promise<SendResult> => {
-      try {
-        const token = await this.getTokenFn();
-        const resp = await this.request(`${this.baseUrl}/v1/events`, {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            authorization: `Bearer ${token}`,
-            "idempotency-key": e.idempotencyKey ?? "",
-          },
-          body: JSON.stringify(e),
-        });
-        if (resp.ok) {
-          const body = (await resp.json()) as {
-            accepted: true;
-            eventId: string;
-            missionsUpdated: string[];
-          };
-          return {
-            ok: true,
-            eventId: body.eventId,
-            missionsUpdated: body.missionsUpdated,
-          };
-        }
-        // Retry on 5xx and 408/429; drop on other 4xx.
-        const retryable =
-          resp.status >= 500 || resp.status === 408 || resp.status === 429;
-        return { ok: false, status: resp.status, retryable };
-      } catch (err) {
-        // Retry-loop-only failures (network timeout, DNS, disconnect,
-        // caller-abort) get queued; programming/config errors rethrow.
-        //
-        // Before TASK-005 follow-up this was a bare catch — that silently
-        // queued a QuestKitError("config_error") from getTokenFn() (e.g. a
-        // misconfigured client) and a SyntaxError from a malformed JSON body
-        // (genuinely-bad server response). Both are programmer-visible bugs
-        // the SDK must NOT absorb.
-        if (isRetryableNetworkError(err)) {
-          return { ok: false, status: 0, retryable: true };
-        }
-        throw err;
-      }
-    };
+    // Behavior contract (TASK-005 + TASK-006):
+    //   - Network/timeout/abort failures → enqueue silently (at-least-once).
+    //   - Programming/config errors (e.g. QuestKitError(code:"config_error")
+    //     from getTokenFn, SyntaxError from a malformed JSON response) →
+    //     rethrow so the caller sees them. See isRetryableNetworkError.
+    //   - On success, optimistic-update listeners fire inside buildSendFn
+    //     before the resolved promise reaches the caller.
+    const sendFn = this.buildSendFn();
 
     const result = await sendFn(event);
     if (result.ok) {
@@ -390,7 +364,19 @@ export class QuestKitClient {
   /** Force-flush the event queue. Used by the host when connectivity returns. */
   async flushEvents(): Promise<void> {
     this.ensureAlive();
-    const sendFn: SendFn = async (e): Promise<SendResult> => {
+    await this.events.flush(this.buildSendFn());
+  }
+
+  /**
+   * Shared send function used by both `fireEvent` (first attempt + queued
+   * retries) and `flushEvents`. Returns a SendResult and — crucially —
+   * dispatches the optimistic `onFireEventSuccess` listeners as soon as the
+   * server confirms the event. That keeps the dispatch path independent of
+   * whether the success came from the first try or a queued retry; both
+   * are equally valid optimistic-update triggers.
+   */
+  private buildSendFn(): SendFn {
+    return async (e): Promise<SendResult> => {
       try {
         const token = await this.getTokenFn();
         const resp = await this.request(`${this.baseUrl}/v1/events`, {
@@ -408,6 +394,7 @@ export class QuestKitClient {
             eventId: string;
             missionsUpdated: string[];
           };
+          this.dispatchFireEventSuccess(body.missionsUpdated);
           return {
             ok: true,
             eventId: body.eventId,
@@ -418,15 +405,17 @@ export class QuestKitClient {
           resp.status >= 500 || resp.status === 408 || resp.status === 429;
         return { ok: false, status: resp.status, retryable };
       } catch (err) {
-        // Same discriminator as fireEvent's sendFn — programming/config
-        // errors must rethrow, not silently re-queue. See isRetryableNetworkError.
+        // TASK-005: retry-only on network/timeout/abort. Programming/config
+        // errors (e.g. QuestKitError(code:"config_error") from getTokenFn,
+        // SyntaxError from JSON.parse on a malformed response body) must
+        // rethrow so callers can surface them — silently queuing them would
+        // hide misconfiguration and bad-payload bugs.
         if (isRetryableNetworkError(err)) {
           return { ok: false, status: 0, retryable: true };
         }
         throw err;
       }
     };
-    await this.events.flush(sendFn);
   }
 
   /** Current event queue depth. */
@@ -631,6 +620,33 @@ export class QuestKitClient {
     };
   }
 
+  /**
+   * Subscribe to "a fireEvent just succeeded" notifications (TASK-006).
+   *
+   * The callback fires after every successful POST /v1/events with the
+   * `missionsUpdated` array the server returned (mission IDs only, not
+   * full progress numbers — for those, use `subscribe()` and watch the
+   * `mission.progress` SDKUpdate).
+   *
+   * Dispatch fires synchronously before `fireEvent` resolves; listeners
+   * run on the same microtask as the server response parse.
+   *
+   * Used by the React `useMissions` hook to optimistically bump
+   * `currentCount` immediately, so the UI feels responsive even when SSE
+   * is degraded (proxy timeout, network flakiness, etc.). The eventual
+   * SSE/refetch is authoritative and overwrites the optimistic state —
+   * see `useMissions.ts` for the merge policy.
+   *
+   * Does NOT establish any background connection. Returns an unsubscribe.
+   */
+  onFireEventSuccess(cb: (missionsUpdated: string[]) => void): () => void {
+    this.ensureAlive();
+    this.fireEventSuccessListeners.add(cb);
+    return () => {
+      this.fireEventSuccessListeners.delete(cb);
+    };
+  }
+
   // ============================================================
   // Lifecycle
   // ============================================================
@@ -644,6 +660,7 @@ export class QuestKitClient {
     this.destroyed = true;
     this.teardownStream();
     this.listeners.clear();
+    this.fireEventSuccessListeners.clear();
   }
 
   // ============================================================
@@ -866,6 +883,22 @@ export class QuestKitClient {
     for (const cb of this.listeners) {
       try {
         cb(update);
+      } catch {
+        // A throwing listener shouldn't kill fanout to the others.
+      }
+    }
+  }
+
+  /**
+   * Fanout helper for `onFireEventSuccess` listeners. Called from both the
+   * direct fireEvent success path and the flushEvents retry path. Defensive
+   * against thrown listeners (same policy as dispatchToListeners).
+   */
+  private dispatchFireEventSuccess(missionsUpdated: string[]): void {
+    if (this.fireEventSuccessListeners.size === 0) return;
+    for (const cb of this.fireEventSuccessListeners) {
+      try {
+        cb(missionsUpdated);
       } catch {
         // A throwing listener shouldn't kill fanout to the others.
       }

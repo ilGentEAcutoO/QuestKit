@@ -232,6 +232,166 @@ describe("questKitClient.fireEvent", () => {
   });
 });
 
+describe("questKitClient.onFireEventSuccess (TASK-006 optimistic updates)", () => {
+  // The SDK fires a `onFireEventSuccess(missionsUpdated)` callback after
+  // every successful fireEvent. The React `useMissions` hook listens to
+  // this and bumps `currentCount` optimistically — so counters keep moving
+  // even when the SSE channel is degraded. See useMissions.ts for the
+  // (intentionally simple) merge policy.
+  it("invokes registered callbacks with missionsUpdated on success", async () => {
+    const { fetchImpl } = mockFetch([
+      jsonResponse({
+        accepted: true,
+        eventId: "ev-success",
+        missionsUpdated: ["m1", "m2"],
+      }),
+    ]);
+    const client = makeClient(fetchImpl);
+    const cb = jest.fn();
+    const unsub = client.onFireEventSuccess(cb);
+
+    await client.fireEvent({ name: "purchase.completed", payload: {} });
+
+    expect(cb).toHaveBeenCalledTimes(1);
+    expect(cb).toHaveBeenCalledWith(["m1", "m2"]);
+
+    unsub();
+    client.destroy();
+  });
+
+  it("does NOT invoke callbacks when fireEvent rejects (4xx)", async () => {
+    const { fetchImpl } = mockFetch([
+      jsonResponse({ error: "invalid_event" }, 400),
+    ]);
+    const client = makeClient(fetchImpl);
+    const cb = jest.fn();
+    client.onFireEventSuccess(cb);
+
+    await expect(
+      client.fireEvent({ name: "x", payload: {} }),
+    ).rejects.toMatchObject({ code: "validation_error" });
+
+    expect(cb).not.toHaveBeenCalled();
+    client.destroy();
+  });
+
+  it("does NOT invoke callbacks when fireEvent is queued (5xx)", async () => {
+    const { fetchImpl } = mockFetch([jsonResponse({ error: "boom" }, 503)]);
+    const client = makeClient(fetchImpl);
+    const cb = jest.fn();
+    client.onFireEventSuccess(cb);
+
+    const r = await client.fireEvent({ name: "x", payload: {} });
+    expect(r.queued).toBe(true);
+    // The callback is only for *successful* immediate posts (and the eventual
+    // success of a queued retry, which we don't exercise here).
+    expect(cb).not.toHaveBeenCalled();
+    client.destroy();
+  });
+
+  it("unsubscribe removes the callback", async () => {
+    const { fetchImpl } = mockFetch([
+      jsonResponse({
+        accepted: true,
+        eventId: "ev1",
+        missionsUpdated: ["m1"],
+      }),
+      jsonResponse({
+        accepted: true,
+        eventId: "ev2",
+        missionsUpdated: ["m1"],
+      }),
+    ]);
+    const client = makeClient(fetchImpl);
+    const cb = jest.fn();
+    const unsub = client.onFireEventSuccess(cb);
+
+    await client.fireEvent({ name: "a", payload: {} });
+    expect(cb).toHaveBeenCalledTimes(1);
+
+    unsub();
+    await client.fireEvent({ name: "b", payload: {} });
+    expect(cb).toHaveBeenCalledTimes(1);
+    client.destroy();
+  });
+
+  it("fans out to multiple listeners", async () => {
+    const { fetchImpl } = mockFetch([
+      jsonResponse({
+        accepted: true,
+        eventId: "ev1",
+        missionsUpdated: ["m1"],
+      }),
+    ]);
+    const client = makeClient(fetchImpl);
+    const a = jest.fn();
+    const b = jest.fn();
+    client.onFireEventSuccess(a);
+    client.onFireEventSuccess(b);
+
+    await client.fireEvent({ name: "x", payload: {} });
+    expect(a).toHaveBeenCalledWith(["m1"]);
+    expect(b).toHaveBeenCalledWith(["m1"]);
+    client.destroy();
+  });
+
+  it("a throwing listener does not block fanout to other listeners", async () => {
+    const { fetchImpl } = mockFetch([
+      jsonResponse({
+        accepted: true,
+        eventId: "ev1",
+        missionsUpdated: ["m1"],
+      }),
+    ]);
+    const client = makeClient(fetchImpl);
+    const bad = jest.fn().mockImplementation(() => {
+      throw new Error("listener boom");
+    });
+    const good = jest.fn();
+    client.onFireEventSuccess(bad);
+    client.onFireEventSuccess(good);
+
+    await client.fireEvent({ name: "x", payload: {} });
+    expect(bad).toHaveBeenCalled();
+    expect(good).toHaveBeenCalledWith(["m1"]);
+    client.destroy();
+  });
+
+  it("fires when a previously-queued event eventually succeeds (via flushEvents)", async () => {
+    // The first POST returns 503, queueing the event. Subsequent POSTs
+    // succeed. Whether the success comes from the background flush
+    // kicked off by fireEvent or from the explicit flushEvents() below,
+    // the listener must be invoked with the server's missionsUpdated.
+    const { fetchImpl } = mockFetch([
+      jsonResponse({ error: "boom" }, 503),
+      jsonResponse({
+        accepted: true,
+        eventId: "ev-retry",
+        missionsUpdated: ["m1"],
+      }),
+    ]);
+    const client = makeClient(fetchImpl);
+    const cb = jest.fn();
+    client.onFireEventSuccess(cb);
+
+    const r = await client.fireEvent({ name: "x", payload: {} });
+    expect(r.queued).toBe(true);
+
+    // Yield to pending microtasks so the background flush kicked off
+    // inside fireEvent can drain, then explicitly flush as a backstop.
+    // Polling beats a fixed setTimeout — flush completion order is not
+    // load-bearing for the test, but the dispatch IS.
+    for (let i = 0; i < 10 && cb.mock.calls.length === 0; i += 1) {
+      await new Promise((r) => setTimeout(r, 0));
+      await client.flushEvents();
+    }
+
+    expect(cb).toHaveBeenCalledWith(["m1"]);
+    expect(cb).toHaveBeenCalledTimes(1);
+    client.destroy();
+  });
+});
+
 describe("questKitClient.getMissions", () => {
   const mission: Mission = {
     id: "m1",
