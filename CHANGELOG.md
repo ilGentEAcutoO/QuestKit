@@ -5,6 +5,44 @@ All notable changes to QuestKit are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.8] — 2026-05-21
+
+v0.1.7 fixed the prompt-parse error but the v0.1.5 observability captured
+a NEW fallback reason on the next deploy:
+
+```
+[ai] fallback reason=envelope-no-strategy-matched
+  model=@cf/meta/llama-3.1-8b-instruct
+  fingerprint={response:object,usage:object}
+```
+
+The AI call now succeeds but the response envelope shape changed when
+`response_format=json_schema` is in use: `response` is now the parsed
+object directly, not a JSON-stringified payload.
+
+### Fixed
+
+- **`workers/api/src/services/ai.ts` — added strategy 1b
+  `response-object`.** When `aiResponse.response` is a non-null,
+  non-array object, treat it as the already-parsed `AiPayload` and skip
+  the JSON.parse step. The three existing strategies still run in order
+  so any non-`json_schema` deploy path keeps working. Fingerprint
+  observability remains; if Workers AI ships a 5th envelope shape, the
+  same recipe (wrangler tail → grep `[ai] fallback reason=`) identifies
+  the new variant.
+
+### Notes
+
+- v0.1.6 → v0.1.7 → v0.1.8 walked the bisect:
+  - v0.1.6: model swap (didn't fix it, but exposed the prompt error).
+  - v0.1.7: prompt-parse fix (didn't fix it, but exposed the envelope drift).
+  - v0.1.8: envelope strategy added — final fix.
+- Total walltime for the 3-step bisect: ~30 minutes. The observability
+  shipped in v0.1.5 (TASK-006) made each step a 30-second `wrangler tail`
+  capture rather than blind iteration.
+
+[0.1.8]: https://github.com/ilGentEAcutoO/QuestKit/releases/tag/v0.1.8
+
 ## [0.1.7] — 2026-05-21
 
 Follow-up to v0.1.6 — the AI model swap exposed the actual root cause via

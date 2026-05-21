@@ -190,6 +190,7 @@ interface EnvelopeOutcome {
   /** Which envelope strategy won (success) OR the last reason for failure. */
   strategy:
     | "response-string"
+    | "response-object"
     | "result-string"
     | "result-object"
     | "raw-object"
@@ -266,6 +267,20 @@ function normalizeAiEnvelope(aiResponse: unknown): EnvelopeOutcome {
     const payload = validateAiPayload(parsed);
     if (payload !== null) return { payload, strategy: "response-string" };
     // Fall through to next strategy if the .response string didn't validate.
+  }
+
+  // Strategy 1b: { response: <object>, usage?: ... } — v0.1.7 json_schema
+  // mode. When response_format=json_schema is supplied, Workers AI parses
+  // the structured output server-side and ships the response field as the
+  // already-parsed object rather than a JSON string. Fingerprint captured
+  // in prod: `{response:object,usage:object}`.
+  if (
+    typeof obj.response === "object" &&
+    obj.response !== null &&
+    !Array.isArray(obj.response)
+  ) {
+    const payload = validateAiPayload(obj.response);
+    if (payload !== null) return { payload, strategy: "response-object" };
   }
 
   // Strategy 2: { result: <object-or-json-string> }
