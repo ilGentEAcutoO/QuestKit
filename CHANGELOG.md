@@ -5,6 +5,56 @@ All notable changes to QuestKit are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.7] — 2026-05-21
+
+Follow-up to v0.1.6 — the AI model swap exposed the actual root cause via
+the v0.1.5 observability:
+
+```
+[ai] fallback reason=ai-run-threw
+  model=@cf/meta/llama-3.1-8b-instruct
+  errName=AiError
+  errMsg=9015: invalid prompt: failed to parse prompt:
+    unknown variant `json_object`, expected `json_schema`
+```
+
+### Fixed
+
+- **`workers/api/src/services/ai.ts` — `response_format` switched from
+  `json_object` to `json_schema`.** Cloudflare Workers AI no longer
+  accepts the deprecated `{ type: "json_object" }` shape on
+  `@cf/meta/llama-3.1-8b-instruct`; the runtime returns AiError 9015 at
+  prompt-parse time before the model even runs. Now sends the explicit
+  schema:
+
+  ```ts
+  response_format: {
+    type: "json_schema",
+    json_schema: {
+      type: "object",
+      properties: {
+        missionIds: { type: "array", items: { type: "string" } },
+        reason: { type: "string" },
+      },
+      required: ["missionIds", "reason"],
+    },
+  }
+  ```
+
+  The existing 3-strategy `normalizeAiEnvelope` stays in place — runtime
+  schema enforcement is the first-line defence; the normaliser is
+  belt-and-suspenders for any edge-case envelope shape. The v0.1.5
+  observability log lines remain so a future regression is grep-able.
+
+### Notes
+
+- Diagnostic recipe in `instruction/work/test-report.md` confirmed for
+  the user-facing workflow: `wrangler tail` while running 5-user curl
+  probes correctly surfaced the AiError 9015 message in one cycle.
+  Total elapsed v0.1.5 deploy → v0.1.7 fix: ~90 minutes.
+
+[0.1.7]: https://github.com/ilGentEAcutoO/QuestKit/releases/tag/v0.1.7
+
 ## [0.1.6] — 2026-05-21
 
 Same-day follow-up to v0.1.5 surfacing three issues caught in the

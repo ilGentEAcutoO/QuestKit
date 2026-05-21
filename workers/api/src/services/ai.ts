@@ -376,7 +376,24 @@ export async function recommendMissions(
         { role: "user", content: userMessage },
       ],
       max_tokens: 200,
-      response_format: { type: "json_object" },
+      // v0.1.7 hotfix — Workers AI no longer accepts `json_object` here.
+      // Production logs from v0.1.6 captured `AiError 9015: invalid prompt:
+      // failed to parse prompt: unknown variant `json_object`, expected
+      // `json_schema``. Switched to the `json_schema` shape with the explicit
+      // schema for the existing AiPayload contract (missionIds + reason).
+      // The runtime now enforces the schema, so the normaliser strategies
+      // are belt-and-suspenders rather than first-line defence.
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          type: "object",
+          properties: {
+            missionIds: { type: "array", items: { type: "string" } },
+            reason: { type: "string" },
+          },
+          required: ["missionIds", "reason"],
+        },
+      },
     });
   } catch (err) {
     const errName = err instanceof Error ? err.name : typeof err;
