@@ -1,6 +1,6 @@
 # QuestKit — Active Tasks
 
-> Last updated: 2026-05-21 14:05 (workflow-exit during v0.1.9 hotfix — RESUME CONTEXT updated; working tree WIP-committed)
+> Last updated: 2026-05-22 06:50 (TASK-010 — sub-agent D complete; all demo gates GREEN; awaiting Lead root gates + commit)
 
 ## RESUME CONTEXT (v0.1.9 hotfix mid-flight)
 
@@ -414,6 +414,46 @@ If next session asks "มีงานค้างไหม":
   - 2026-05-21 13:45 - Task created. Playwright MCP tools loaded. agent-temp ready. Starting at `/ecommerce`.
   - 2026-05-21 13:55 - Walkthrough complete. 8/8 PASS (S8 has F1 noise — separately logged). Full evidence in test-report.md "TASK-009" section. Phase 9 acceptance: PASS. Awaits user disposition on F1 (defer to Phase 10 vs. hotfix as v0.1.9).
 
+### Task: [TASK-010] v0.1.9 hotfix — F1 fix (KV replay symmetry + demo toast for silent 409)
+
+- **Status:** 🔵 in-progress (resuming from RESUME CONTEXT 2026-05-21 14:05)
+- **Priority:** P0 (Phase 9 hotfix, blocks acceptance close-out)
+- **Parallel:** yes (W + D streams independent, touch different packages)
+- **Assigned:** Lead (Opus 4.7) + sub-agents W + D
+- **Depends on:** TASK-009 (✅ done — F1 finding)
+- **Skills:** git-commit, git-push, deploy, frontend-test
+- **Covers:** F1 — silent `claim_not_ready` (409) on apparent-3/3 Curious Mind claim
+- **Root cause:** Asymmetric idempotency replays — D1 UNIQUE-collision branch returned `missionsUpdated:[]`, but KV `getOrSet` replay branch returned the original mission IDs. Retried event "succeeded" with stale mission updates that no longer reflected server state → demo optimistic counter overshot → silent 409 on claim.
+- **Files (already in WIP commit `18b0972`):**
+  - `workers/api/src/services/ingest.ts:175-184` — KV replay returns `missionsUpdated:[]` (symmetry with D1 branch)
+  - `workers/api/test/events.route.test.ts` (+71 LOC) — regression test for KV-replay symmetry
+  - `package.json` 0.1.8 → 0.1.9
+  - `workers/api/src/index.ts` `/v1/health` version → 0.1.9
+  - `CHANGELOG.md` v0.1.9 entry
+  - `instruction/work/test-report.md` TASK-009 walkthrough section
+- **Files (pending — demo sub-agent D):**
+  - `apps/demo/src/components/DemoToastHost.tsx` (PARKED IN stash@{0} — half-done error-variant refactor, +68 LOC, needs `git stash pop`)
+  - `apps/demo/src/lib/useMissionClaim.ts:72-74` — wire catch block to detect `QuestKitError` 409/claim_not_ready, surface toast + refetch
+  - `apps/demo/src/lib/useMissionClaim.test.tsx` (NEW — Jest spec asserting toast + onClaimed both called on 409)
+- **Sub-agent assignments:**
+  - **W (Worker Verifier, Opus 4.7):** Verify ingest.ts + events.route.test.ts diff sanity, run `pnpm --filter @questkit/worker-api test/typecheck/lint`, report all-green or failure list. NO new file edits.
+  - **D (Demo Fix Finisher, Opus 4.7):** Pop stash, complete useMissionClaim wiring + write Jest test, run `pnpm --filter @questkit/demo test/typecheck/lint`. Files locked under TASK-010 below.
+- **Subtasks:**
+  - [x] WIP commit landed (`18b0972`) with worker fix + version bumps + docs
+  - [x] verify (W): worker-api gates GREEN against landed diffs (test 209/0/1 skip, typecheck clean, lint clean modulo pre-existing Node ESM warning)
+  - [x] implement (D): pop stash + wire useMissionClaim + write test
+  - [x] verify (D): demo gates GREEN
+  - [x] verify (Lead): root gates `pnpm typecheck && pnpm lint && pnpm test` — 14/14 typecheck, 10/10 lint, 500+ tests (worker-api 209/0/1-skip, react 150/0, core 116/0, demo 4/0, embed 21/0, webhook-relay 3 suites, webhook-consumer 1 suite) — ALL GREEN
+  - [ ] commit (Lead): NEW commit on top of WIP — "v0.1.9 hotfix — F1 fix (KV replay symmetry + demo toast)" via git-commit skill, NO AI signature
+  - [ ] push + monitor (Lead): git-push skill, CI green, deploy green, smoke green (E2E may stay red — TASK-005 manual gate)
+  - [ ] prod verify (Lead): `/v1/health` shows 0.1.9; Playwright fresh-user F1 reproduction (must succeed, no 409); existing-user scenario deferred to user manual
+  - [ ] archive (Lead): `/workflow-end` after user confirmation — moves work/ to `instruction/archive/003-phase-9-v0.1.9-bug-fix-sweep/`
+- **Progress Notes:**
+  - 2026-05-21 14:05 - WIP commit landed during workflow-exit (per RESUME CONTEXT above). Sub-agents stopped mid-task.
+  - 2026-05-22 06:29 - Resuming. Working tree clean, WIP at HEAD (1 ahead of origin), stash@{0} confirmed. Sub-agents W + D dispatched in parallel.
+  - 2026-05-22 06:30 - Sub-agent W reports ALL GREEN: diff sanity PASS (ingest.ts +6/-1 KV replay symmetry with D1 comment; events.route.test.ts +71 LOC new test primes 2 events → 3rd → idempotent replay asserts missionsUpdated:[] and replay header=hit). Tests 209/0/1-skip in 11.6s. Typecheck clean. Lint clean (one pre-existing MODULE_TYPELESS_PACKAGE_JSON Node warning unrelated to hotfix). Worker side verified. Awaiting sub-agent D.
+  - 2026-05-22 06:50 - Sub-agent D complete: stash recovered (cherry-picked only DemoToastHost.tsx — other stash files identical to HEAD or out of D's scope; stash@{0} left for Lead to drop). Finished DemoToastHost render-block wiring (item.reward→item.input, RewardIcon/rewardLabel→ToastIcon/toastLabel, error-variant container styling + description sub-line). Wired useMissionClaim.ts:72 catch block: `err instanceof QuestKitError && (status===409 || code==='claim_not_ready')` → showToast({kind:'error',title,description}) + await onClaimed (failures swallowed). NEW test apps/demo/src/lib/useMissionClaim.test.tsx: 2 specs (409→toast+refetch, 500→neither). Demo gates: test 4/4 in 2 suites, typecheck clean, lint clean. Locks released.
+
 ## File Lock Registry
 
 | File                                                                     | Locked by          | Task                        | Since                  |
@@ -438,3 +478,6 @@ If next session asks "มีงานค้างไหม":
 | ~~`apps/demo/e2e/claim-flow.spec.ts`~~ (new) released 12:30              | ~~TASK-002 Agent~~ | TASK-002 (done)             | 2026-05-21 12:10–12:30 |
 | ~~`apps/demo/e2e/daily.spec.ts`~~ released 12:30                         | ~~TASK-002 Agent~~ | TASK-002 (done)             | 2026-05-21 12:10–12:30 |
 | ~~`apps/demo/e2e/streaming.spec.ts`~~ released 12:30                     | ~~TASK-002 Agent~~ | TASK-002 (done)             | 2026-05-21 12:10–12:30 |
+| ~~`apps/demo/src/components/DemoToastHost.tsx`~~ released 06:50          | ~~D (demo-fix)~~   | TASK-010 (D-done)           | 2026-05-22 06:29–06:50 |
+| ~~`apps/demo/src/lib/useMissionClaim.ts`~~ released 06:50                | ~~D (demo-fix)~~   | TASK-010 (D-done)           | 2026-05-22 06:29–06:50 |
+| ~~`apps/demo/src/lib/useMissionClaim.test.tsx`~~ (new) released 06:50    | ~~D (demo-fix)~~   | TASK-010 (D-done)           | 2026-05-22 06:29–06:50 |

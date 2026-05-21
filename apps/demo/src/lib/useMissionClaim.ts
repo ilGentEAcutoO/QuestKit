@@ -26,6 +26,7 @@
  *   `onClaimed` wired to their `useMissions().refetch`.
  */
 import type { Reward } from "@questkit/types";
+import { QuestKitError } from "@questkit/core";
 import { useQuestKit } from "@questkit/react";
 import { useCallback } from "react";
 
@@ -71,6 +72,34 @@ export function useMissionClaim(
         }
       } catch (err) {
         console.warn("[demo] claimMission failed", err);
+        // F1 hotfix (v0.1.9): surface the silent 409 "claim_not_ready" path —
+        // previously this branch only console.warn'd, leaving the user with
+        // no feedback when the optimistic counter overshot the server's
+        // authoritative progress (root cause was the KV idempotency replay
+        // asymmetry, fixed worker-side; this is the demo's belt-and-
+        // suspenders so any future regression can't silently swallow a 409).
+        const is409NotReady =
+          err instanceof QuestKitError &&
+          (err.status === 409 || err.code === "claim_not_ready");
+        if (is409NotReady) {
+          showToast({
+            kind: "error",
+            title: "Not ready yet",
+            description:
+              "This mission isn't complete on the server yet. Refreshing…",
+          });
+          // Always refetch on 409 — the optimistic counter was wrong, so the
+          // UI MUST converge back to authoritative state before the user
+          // tries again. Failures here are swallowed (same policy as the
+          // success path) so they never block the toast.
+          if (onClaimed !== undefined) {
+            try {
+              await onClaimed();
+            } catch (refetchErr) {
+              console.warn("[demo] post-409 refetch failed", refetchErr);
+            }
+          }
+        }
       }
     },
     [client, showToast, onClaimed],

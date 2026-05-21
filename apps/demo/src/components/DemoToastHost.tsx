@@ -30,31 +30,73 @@ import { createPortal } from "react-dom";
 
 import { BadgeIcon, CoinIcon, GiftIcon } from "./icons";
 
+/**
+ * Error toast payload — surfaced for non-success claim outcomes that would
+ * otherwise leave the user with no feedback (e.g. F1 hotfix v0.1.9: the
+ * 409 `claim_not_ready` round-trip during a multi-session resume). The
+ * discriminator overlaps the `Reward` union deliberately so callers pass
+ * a single `kind`-tagged object and the host picks the visual variant.
+ */
+export interface DemoToastError {
+  kind: "error";
+  title: string;
+  description?: string;
+}
+
+export type DemoToastInput = Reward | DemoToastError;
+
 interface ToastItem {
   id: number;
-  reward: Reward;
+  input: DemoToastInput;
 }
 
 interface DemoToastContextValue {
-  show: (reward: Reward) => void;
+  show: (input: DemoToastInput) => void;
 }
 
 const DemoToastContext = createContext<DemoToastContextValue | null>(null);
 
-function rewardLabel(reward: Reward): string {
-  if (reward.kind === "currency") {
-    return `+${reward.amount} ${reward.currency}`;
-  }
-  if (reward.kind === "badge") {
-    return `Badge: ${reward.badgeId}`;
-  }
-  return `${reward.quantity}× ${reward.itemId}`;
+function isErrorToast(input: DemoToastInput): input is DemoToastError {
+  return input.kind === "error";
 }
 
-function RewardIcon({ reward }: { reward: Reward }): ReactElement {
+function toastLabel(input: DemoToastInput): string {
+  if (isErrorToast(input)) return input.title;
+  if (input.kind === "currency") {
+    return `+${input.amount} ${input.currency}`;
+  }
+  if (input.kind === "badge") {
+    return `Badge: ${input.badgeId}`;
+  }
+  return `${input.quantity}× ${input.itemId}`;
+}
+
+function ToastIcon({ input }: { input: DemoToastInput }): ReactElement {
   // 24px to match the 9×9-tailwind (36px) container with a comfortable bezel.
-  if (reward.kind === "currency") return <CoinIcon size={24} />;
-  if (reward.kind === "badge") return <BadgeIcon size={24} />;
+  if (isErrorToast(input)) {
+    // Inline warning glyph — keeps the host self-contained (no new icon
+    // module import). Stroke uses currentColor so the error variant's
+    // surface colour (set below) drives it.
+    return (
+      <svg
+        width={24}
+        height={24}
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <circle cx="12" cy="12" r="10" />
+        <line x1="12" y1="8" x2="12" y2="12" />
+        <line x1="12" y1="16" x2="12.01" y2="16" />
+      </svg>
+    );
+  }
+  if (input.kind === "currency") return <CoinIcon size={24} />;
+  if (input.kind === "badge") return <BadgeIcon size={24} />;
   return <GiftIcon size={24} />;
 }
 
@@ -80,9 +122,9 @@ export function DemoToastProvider({
   }, []);
 
   const show = useCallback(
-    (reward: Reward): void => {
+    (input: DemoToastInput): void => {
       const id = Date.now() + Math.random();
-      const item: ToastItem = { id, reward };
+      const item: ToastItem = { id, input };
       setItems((prev) => [...prev, item]);
       setTimeout(() => {
         setItems((prev) => prev.filter((p) => p.id !== id));
@@ -135,20 +177,38 @@ export function DemoToastProvider({
                     <span
                       aria-hidden="true"
                       className="grid h-9 w-9 shrink-0 place-items-center rounded-full"
-                      style={{
-                        background: "oklch(0.96 0.01 95)",
-                        border: "1px solid oklch(0.85 0.04 90)",
-                      }}
+                      style={
+                        isErrorToast(item.input)
+                          ? {
+                              background: "oklch(0.95 0.03 30)",
+                              border: "1px solid oklch(0.75 0.13 30)",
+                              color: "oklch(0.50 0.18 30)",
+                            }
+                          : {
+                              background: "oklch(0.96 0.01 95)",
+                              border: "1px solid oklch(0.85 0.04 90)",
+                            }
+                      }
                     >
-                      <RewardIcon reward={item.reward} />
+                      <ToastIcon input={item.input} />
                     </span>
                     <span className="flex-1 text-sm font-semibold">
-                      {rewardLabel(item.reward)}
+                      {toastLabel(item.input)}
+                      {isErrorToast(item.input) &&
+                      item.input.description !== undefined ? (
+                        <span className="mt-0.5 block text-xs font-normal opacity-80">
+                          {item.input.description}
+                        </span>
+                      ) : null}
                     </span>
                     <button
                       type="button"
                       onClick={() => dismiss(item.id)}
-                      aria-label="Dismiss reward"
+                      aria-label={
+                        isErrorToast(item.input)
+                          ? "Dismiss notice"
+                          : "Dismiss reward"
+                      }
                       className="grid h-7 w-7 place-items-center rounded-md text-base transition-colors hover:bg-[color:var(--color-demo-surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[color:var(--color-qk-primary)]"
                       style={{ color: "var(--color-qk-fg)" }}
                     >
