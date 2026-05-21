@@ -173,10 +173,15 @@ export async function ingestEventCore(
       missionsUpdated: string[];
     }>(env.CACHE, userId, effectiveIdemKey);
     if (cached !== null) {
+      // v0.1.9 F1 — symmetry with the D1 partial-unique-index replay branch
+      // below (line ~216), which has always returned `missionsUpdated: []`.
+      // Echoing the cached non-empty array caused the SDK's useMissions
+      // optimistic counter to bump again on every replay, producing a
+      // silent 409 `claim_not_ready`. Replays are no-ops by contract.
       return {
         accepted: true,
         eventId: cached.eventId,
-        missionsUpdated: cached.missionsUpdated,
+        missionsUpdated: [],
         replayed: "kv",
       };
     }

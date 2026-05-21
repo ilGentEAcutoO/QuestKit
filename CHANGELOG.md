@@ -5,6 +5,49 @@ All notable changes to QuestKit are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.9] — 2026-05-21
+
+Post-deploy walkthrough on v0.1.8 (Phase 9 TASK-009) surfaced a silent
+claim failure (F1) caused by an asymmetry between the two idempotency
+replay paths in `services/ingest.ts`. The fix is a one-line source
+change that brings the KV replay return into parity with the existing
+D1 replay return, plus a defense-in-depth toast + refetch on the demo
+side so any future similar desync becomes self-healing instead of
+silent.
+
+### Fixed
+
+- **`workers/api/src/services/ingest.ts:179` — KV replay no longer
+  echoes the original `missionsUpdated`.** The D1 UNIQUE-constraint
+  replay branch at line 216 already returned `missionsUpdated: []`
+  for replays; the KV branch was returning the cached array
+  verbatim. Replays bypass the rule engine entirely, so letting them
+  claim "these missions just incremented" caused the SDK's
+  `useMissions` `onFireEventSuccess` to optimistically bump the
+  client mirror while D1 stayed put. The desync surfaced as a
+  silent `409 claim_not_ready` when a multi-session resume user
+  clicked Claim on what the UI said was a 3/3 mission.
+
+- **`apps/demo/src/lib/useMissionClaim.ts` — toast + refetch on 409.**
+  The catch block now detects `QuestKitError` with
+  `claim_not_ready` (or any 409) and (a) shows an error toast so
+  the user gets feedback instead of a no-op click, (b) calls
+  `onClaimed?.()` to refetch missions and re-sync with
+  server-authoritative state.
+
+### Notes
+
+- Root cause + investigation trace in
+  `instruction/work/test-report.md` under "TASK-009 — Production
+  walkthrough on v0.1.8" → F1 section.
+- TASK-007 (D3 closed as "non-bug" during Phase 9) should be
+  reopened in Phase 10 to revisit the optimistic-counter design
+  more defensively if desired. This hotfix removes the trigger
+  condition without restructuring that design.
+- No DB migration. No breaking SDK change.
+
+[0.1.9]: https://github.com/ilGentEAcutoO/QuestKit/releases/tag/v0.1.9
+
 ## [0.1.8] — 2026-05-21
 
 v0.1.7 fixed the prompt-parse error but the v0.1.5 observability captured

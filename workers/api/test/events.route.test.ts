@@ -402,6 +402,77 @@ describe("post /v1/events — idempotency", () => {
     expect(b2.eventId).toBe(b1.eventId);
     expect(r2.headers.get("x-idempotent-replay")).toBe("hit");
   });
+
+  // v0.1.9 F1 regression — bug fix: the KV replay branch in
+  // ingestEventCore previously echoed `cached.missionsUpdated`, while the
+  // D1 partial-unique-index replay branch already returned `[]`. The
+  // asymmetry caused the SDK's useMissions optimistic counter to bump on
+  // every KV replay even though no fresh D1 work happened, producing a
+  // silent 409 `claim_not_ready` on the next claim attempt.
+  //
+  // Contract going forward: BOTH replay branches return
+  // `missionsUpdated: []`. The first (fresh) call still returns the real
+  // mission-updates array — it's only the replay that is now a no-op for
+  // the consumer.
+  it("returns missionsUpdated:[] on a KV idempotency replay even when the original ingest updated missions", async () => {
+    const userId = `u_idem_replay_missions_${crypto.randomUUID()}`;
+    const { token } = await mintToken(userId);
+    const baseTs = Date.now();
+
+    // Fire 2 prior purchase.completed events so the 3rd will trigger M1
+    // (mis_ecom_daily_purchase_3 — 3 purchases in a day).
+    for (let i = 0; i < 2; i++) {
+      const res = await postEvent(
+        {
+          userId,
+          name: "purchase.completed",
+          payload: { amount: 10, category: "books" },
+          timestamp: baseTs + i,
+        },
+        { token, idempotencyHeader: `priming_${i}_${crypto.randomUUID()}` },
+      );
+      expect(res.status).toBe(200);
+    }
+
+    // The 3rd purchase carries a stable idempotency key — fresh ingest
+    // should populate missionsUpdated with at least mis_ecom_daily_purchase_3.
+    const idemKey = `idem_replay_missions_${crypto.randomUUID()}`;
+    const thirdBody = {
+      userId,
+      name: "purchase.completed",
+      payload: { amount: 10, category: "books" },
+      timestamp: baseTs + 2,
+    };
+
+    const r1 = await postEvent(thirdBody, {
+      token,
+      idempotencyHeader: idemKey,
+    });
+    expect(r1.status).toBe(200);
+    const b1 = (await r1.json()) as {
+      eventId: string;
+      missionsUpdated: string[];
+    };
+    // Fresh ingest reports the mission update.
+    expect(b1.missionsUpdated).toContain("mis_ecom_daily_purchase_3");
+
+    // Second identical request: KV replay branch. The cached event id is
+    // returned (so the client can correlate) but missionsUpdated MUST be
+    // empty — no new D1 / mission_progress work happened, so the SDK
+    // must not optimistically bump anything a second time.
+    const r2 = await postEvent(thirdBody, {
+      token,
+      idempotencyHeader: idemKey,
+    });
+    expect(r2.status).toBe(200);
+    expect(r2.headers.get("x-idempotent-replay")).toBe("hit");
+    const b2 = (await r2.json()) as {
+      eventId: string;
+      missionsUpdated: string[];
+    };
+    expect(b2.eventId).toBe(b1.eventId);
+    expect(b2.missionsUpdated).toEqual([]);
+  });
 });
 
 describe("post /v1/events — analytics engine wiring", () => {
@@ -475,8 +546,7 @@ describe("post /v1/events — rate limiter enforcement (TASK-011)", () => {
     expect(Number.isFinite(retryAfterSec)).toBe(true);
     expect(retryAfterSec).toBeGreaterThan(0);
     expect(retryAfterSec).toBeLessThanOrEqual(60);
-  }, // take a while under workerd. Default 5s isn't always enough. // Generous test timeout: 100+ serial fetches through the worker can
-  20_000);
+  }, 20_000); // take a while under workerd. Default 5s isn't always enough. // Generous test timeout: 100+ serial fetches through the worker can
 
   it("treats a non-200/429 status from the limiter as 'allow' (defensive)", async () => {
     // We can't easily make the real DO return e.g. 500 without code surgery

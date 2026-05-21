@@ -1,9 +1,90 @@
 # QuestKit — Active Tasks
 
-> Last updated: 2026-05-21 13:30 (Phase 9 — ALL TASKS COMPLETE + 3 hotfixes shipped; v0.1.8 live in prod, B6 verified working)
+> Last updated: 2026-05-21 14:05 (workflow-exit during v0.1.9 hotfix — RESUME CONTEXT updated; working tree WIP-committed)
 
-## RESUME CONTEXT
+## RESUME CONTEXT (v0.1.9 hotfix mid-flight)
 
+> Exit time: 2026-05-21 14:05
+> Reason: User invoked /workflow-exit during v0.1.9 hotfix work
+> Working tree: WIP commit pinned to `main`. Sub-agents stopped via TaskStop.
+
+### What's landed (in the WIP commit)
+
+| File                                                                      | Status                                                                                                                                                                                                                                                                                                              | Origin                                                                                                                     |
+| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `package.json` (0.1.8 → 0.1.9)                                            | ✅ clean                                                                                                                                                                                                                                                                                                            | Main agent                                                                                                                 |
+| `workers/api/src/index.ts` (/v1/health version → 0.1.9)                   | ✅ clean                                                                                                                                                                                                                                                                                                            | Main agent                                                                                                                 |
+| `CHANGELOG.md` (+ v0.1.9 entry above v0.1.8)                              | ✅ clean                                                                                                                                                                                                                                                                                                            | Main agent                                                                                                                 |
+| `instruction/work/test-report.md` (TASK-009 walkthrough section appended) | ✅ clean                                                                                                                                                                                                                                                                                                            | Main agent                                                                                                                 |
+| `instruction/work/todos.md` (TASK-009 status; this RESUME CONTEXT block)  | ✅ clean                                                                                                                                                                                                                                                                                                            | Main agent                                                                                                                 |
+| `workers/api/src/services/ingest.ts:175-184`                              | ✅ landed (UNVERIFIED)                                                                                                                                                                                                                                                                                              | Worker sub-agent — source fix: KV replay returns `missionsUpdated:[]`, matches D1 replay symmetry. Comment explains.       |
+| `workers/api/test/events.route.test.ts` (+71 LOC)                         | ✅ landed (UNVERIFIED)                                                                                                                                                                                                                                                                                              | Worker sub-agent — regression test for KV replay; possibly updated an existing test that expected the old broken behavior. |
+| `apps/demo/src/components/DemoToastHost.tsx` (+68 LOC)                    | ⚠️ HALF + **PARKED IN STASH@{0}** — lint failed (unused `toastLabel`, `ToastIcon` from interrupted refactor) so was kept out of the WIP commit. Stash msg: `workflow-exit: DemoToastHost half-done error-variant refactor (v0.1.9 F1 demo fix in-progress) - 2026-05-21 14:05`. Pop with `git stash pop stash@{0}`. | Demo sub-agent                                                                                                             |
+| `apps/demo/src/lib/useMissionClaim.ts:72-74`                              | ❌ **NOT YET WIRED** to the new toast — still does `console.warn` only                                                                                                                                                                                                                                              | Demo sub-agent stopped before this edit                                                                                    |
+| `apps/demo/src/lib/useMissionClaim.test.tsx` (new Jest spec)              | ❌ NOT created — demo sub-agent never reached this                                                                                                                                                                                                                                                                  | Pending                                                                                                                    |
+| `agent-temp/phase9-01..06.png` (6 walkthrough screenshots)                | ✅ moved into agent-temp/ (rule: never at project root)                                                                                                                                                                                                                                                             | Main agent                                                                                                                 |
+
+### Resume entry point (next session — what /workflow-work must do)
+
+1. **Verify worker fix:**
+   - `git diff workers/api/src/services/ingest.ts` — confirm the ~7-line change at lines 175-184 looks sane (matches D1 symmetry; comment explains why).
+   - `git diff workers/api/test/events.route.test.ts` — review the +71 LOC; the new test must construct an idempotent replay and assert response has `missionsUpdated: []`. If an existing test was modified (e.g., one previously asserting `missionsUpdated: ['mis_...']` on a replay), confirm the update is correct.
+   - Run gates: `pnpm --filter @questkit/worker-api test`, `pnpm --filter @questkit/worker-api typecheck`, `pnpm --filter @questkit/worker-api lint`. All must be GREEN.
+
+2. **Finish demo fix:**
+   - **First — recover the parked DemoToastHost edit:** `git stash list` (look for `workflow-exit: DemoToastHost half-done…`), then `git stash pop stash@{0}`. This restores the half-done error-variant refactor to the working tree.
+   - `git diff apps/demo/src/components/DemoToastHost.tsx` — review the +68 LOC for the new error toast variant. Confirm the API the demo sub-agent designed is reasonable (probably extending `Reward | {kind:"error", ...}` or similar). Note: the file currently fails ESLint with `'toastLabel' is defined but never used` and `'ToastIcon' is defined but never used` because the refactor is mid-flight — wiring `useMissionClaim` to consume the new variant is what makes those vars "used."
+   - **Wire `apps/demo/src/lib/useMissionClaim.ts:72-74`** — expand the catch block:
+     ```ts
+     } catch (err) {
+       console.warn("[demo] claimMission failed", err);
+       if (isQuestKitError(err) && (err.status === 409 || err.code === "claim_not_ready")) {
+         showToast({ kind: "error", /* match the contract the agent built into DemoToastHost */ });
+         if (onClaimed !== undefined) {
+           try { await onClaimed(); } catch (e) { console.warn("[demo] post-409 refetch failed", e); }
+         }
+       }
+     }
+     ```
+     Import `QuestKitError` (or whatever the SDK exports) from `@questkit/core`. Pick the right error-detection predicate based on what `packages/core/src/client.ts` exports — likely `err instanceof QuestKitError && err.code === "claim_not_ready"`.
+   - **Write `apps/demo/src/lib/useMissionClaim.test.tsx`** — Jest test that mocks `client.claimMission` to reject with `QuestKitError` (409 claim_not_ready), mocks `showToast` + `onClaimed`, asserts both were called.
+   - Run gates: `pnpm --filter @questkit/demo test`, `…typecheck`, `…lint`.
+
+3. **Converge gates from root:** `pnpm typecheck && pnpm lint && pnpm test` — all packages.
+
+4. **Amend WIP commit** (or new commit on top):
+   - The current WIP commit is named `WIP: workflow-exit during v0.1.9 hotfix …`. Either amend it with the additional changes, or land a NEW commit titled `v0.1.9 hotfix — F1 fix (KV replay symmetry + demo toast)`. Use the `git-commit` skill. **NO AI signature** per CLAUDE.md rule #7.
+
+5. **Push + monitor CI:** `git push`, then `gh run watch` (or just `gh run list -L 5`). CI must turn green; deploy workflow must run; smoke test must pass. The E2E step may stay red — that's the still-unresolved TASK-005 manual gate (orthogonal to v0.1.9).
+
+6. **Prod verify:**
+   - `curl https://api.questkit.jairukchan.com/v1/health` — expect `{"ok":true,"version":"0.1.9","commit":"…"}`.
+   - Reproduce F1: open `https://questkit.jairukchan.com` in a private window (fresh user — no carry-over), watch 3 documentaries, claim Curious Mind — must succeed cleanly (200 with reward, no 409). For an EXISTING multi-session user (the F1 trigger scenario), the new demo toast + refetch should now appear instead of silent failure.
+
+7. **Archive Phase 9:** `/workflow-end` — moves work/\* into `instruction/archive/003-phase-9-v0.1.8-bug-fix-sweep/` (or rename to reflect 0.1.9 in the archive folder name). Resets work/ for Phase 10.
+
+### Sub-agent IDs (stopped, do not resume — work was captured in the working tree)
+
+- Worker fix agent: `a8d14cd71a40e3c27` — last reported action "Now run the new test to confirm GREEN, plus the full worker-api suite + typecheck + lint." (killed before this happened)
+- Demo fix agent: `a989e2b1275da7081` — last reported action "Now update the toast rendering to use the new shape and apply error styling." (was mid-edit on DemoToastHost when killed; never reached useMissionClaim wiring)
+
+### Phase 10 backlog (carried forward unchanged from earlier RESUME CONTEXT)
+
+- Server-side minigame coin mint (B5 option b)
+- BadgeWall persistence via `user_badges` table (badges granted outside mission flow)
+- Replace `local-only` `binge_starter` celebration toast with a real server-side mission
+- TASK-007 (D3) — reopen for defensive optimistic-counter pattern review (the v0.1.9 hotfix removes the trigger but the pattern itself still relies on `missionsUpdated` accuracy)
+
+---
+
+## RESUME CONTEXT — SUPERSEDED (kept for history)
+
+> ⚠️ This earlier RESUME CONTEXT (13:30) is **superseded** by the newer
+> "RESUME CONTEXT (v0.1.9 hotfix mid-flight)" block at the top of this
+> file. The 13:30 block documents the state right after Phase 9 shipped
+> v0.1.5–v0.1.8; the 14:05 block documents the v0.1.9 hotfix
+> mid-flight state which is what the next session must resume from.
+>
 > Exit time: 2026-05-21 13:30
 > Reason: User invoked /workflow-exit — session checkpoint
 > Working tree: clean. All changes committed and pushed.
@@ -304,6 +385,34 @@ If next session asks "มีงานค้างไหม":
     ❌ "Run E2E suite against live deploy" failed — EXPECTED: CF WAF rule + GH secret not yet wired (TASK-005 manual sub-steps).
     **Production verification:** `curl https://api.questkit.jairukchan.com/v1/health` returns `{"ok":true,"version":"0.1.5","commit":"dev"}` — v0.1.5 IS LIVE.
     Bug fixes B1/B3/B4/B5 + D1–D6 all shipped. B6 escalated to Phase 10. Walkthrough belongs to user (real browser + DevTools).
+
+### Task: [TASK-009] Frontend automated walkthrough — prod v0.1.8 verification
+
+- **Status:** 🟢 done (PASS with one Phase-10 finding — see F1 below)
+- **Priority:** P0 (Phase 9 acceptance gate)
+- **Parallel:** no (single browser session)
+- **Assigned:** Main Agent (Opus 4.7) via frontend-test skill + Playwright MCP
+- **Depends on:** TASK-001 → TASK-008 (all done)
+- **Skills:** frontend-test
+- **Covers:** manual walkthrough checkboxes on TASK-002 + TASK-008
+- **Environment:** production — `https://questkit.jairukchan.com` + `https://api.questkit.jairukchan.com`
+- **Files:**
+  - `instruction/work/test-report.md` (TASK-009 section appended — see for full evidence)
+  - `agent-temp/phase9-01-landing.png` … `phase9-06-minigames-ai-picks-panel.png`
+- **Scenarios:**
+  - [x] S1: footer reads `v0.1.8` ✅
+  - [x] S2: B1 `/ecommerce` claim → balance 0→100 + card flipped + 3 SSE events ✅
+  - [x] S3: B3 `/streaming` widget reconciles with mission (lockstep across 4 events incl. drama filter) ✅
+  - [x] S4: B4 `/daily` streak persists after full reload (0 localStorage streak keys) ✅
+  - [x] S5: B5 `/minigames` spin toast "You won: Bonus tick!" + zero "coin"/"gem" in main + balance unchanged ✅
+  - [x] S6: BadgeWall FAB opens "Earned badges" panel; shows Daily Visitor ✅
+  - [x] S7: AI picks populated with personalized LLM intro + 2 real picks ✅
+  - [x] S8: console clean except F1 (no CSP/CORS/404/hydration/React noise) ⚠️ → F1 logged
+- **New finding (logged for Phase 10):**
+  - **F1:** Silent `claim_not_ready` (409) on apparent-3/3 Curious Mind claim. Server-authoritative state was 2/3 (visible in AI picks panel) while `/streaming` mirror was 3/3 (optimistic counter overshoot in multi-session resume). Demo swallows the 409 with `console.warn` only — no user-visible feedback. P2, adjacent to TASK-007 (D3 "non-bug" verdict should be reopened). Fix candidates: demo toast + refetch on 409, or worker-side error code split. **NOT a Phase 9 regression** — B1/B3/B4/B5/B6 all verified.
+- **Progress Notes:**
+  - 2026-05-21 13:45 - Task created. Playwright MCP tools loaded. agent-temp ready. Starting at `/ecommerce`.
+  - 2026-05-21 13:55 - Walkthrough complete. 8/8 PASS (S8 has F1 noise — separately logged). Full evidence in test-report.md "TASK-009" section. Phase 9 acceptance: PASS. Awaits user disposition on F1 (defer to Phase 10 vs. hotfix as v0.1.9).
 
 ## File Lock Registry
 
