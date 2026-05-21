@@ -3,6 +3,12 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { lazy, type ReactElement, Suspense, useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 
+// Footer reads the canonical version from the monorepo root package.json
+// so future bumps (e.g. TASK-008 → 0.1.5) propagate without code edits.
+// Vite resolves JSON imports natively at build time; TS picks it up via the
+// inherited `resolveJsonModule: true` in tsconfig.base.json.
+import pkg from "../../../../package.json";
+
 import { CoinIcon } from "./icons";
 
 // Defer floating panels to a separate chunk so the initial visual frame
@@ -223,7 +229,8 @@ export function Layout(): ReactElement {
           color: "var(--color-demo-muted)",
         }}
       >
-        QuestKit v0.1.0 — open source gamification SDK on Cloudflare Workers.
+        QuestKit v{pkg.version} — open source gamification SDK on Cloudflare
+        Workers.
       </footer>
 
       {/* Floating panels — pure overlays, no layout impact.

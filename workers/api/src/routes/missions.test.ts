@@ -189,6 +189,108 @@ describe("post /v1/missions/:id/claim — SSE deadlock regression (TASK-001)", (
     }
   });
 
+  // Phase 9 / TASK-001 Cluster C1 — the claim broadcast must deliver
+  // THREE distinct SDKUpdate events to a live SSE subscriber:
+  //   1. mission.claimed  (terminal status flip — drives card UI)
+  //   2. reward.granted   (toast trigger)
+  //   3. balance.changed  (currency-reward only — refreshes BalanceBadge)
+  //
+  // The test registers a healthy (actively-drained) subscriber on the
+  // user's SSE hub, fires the claim, and asserts all three frames land
+  // within a generous budget. Before TASK-001 only events (2) and (3)
+  // were emitted — bug B1 manifested as the card staying at "Claim"
+  // because no event flipped the status. This test pins the new
+  // contract.
+  it("delivers mission.claimed + reward.granted + balance.changed to a live SSE subscriber", async () => {
+    const userId = "u_claim_broadcast_smoke";
+    const { token } = await mintToken(userId);
+    await ensureUser(env.DB, userId);
+    await upsertProgress(env.DB, {
+      userId,
+      missionId: "mis_ecom_daily_purchase_3",
+      status: "completed",
+      progress: 1,
+      currentCount: 3,
+      targetCount: 3,
+      updatedAt: Date.now(),
+    });
+
+    // Register a healthy subscriber on the user's SSE hub. The DO
+    // `idFromName(userId)` resolves to the same instance the claim
+    // route's broadcaster targets.
+    const stubId = env.SSE_HUB.idFromName(userId);
+    const stub = env.SSE_HUB.get(stubId);
+    const subRes = await stub.fetch("https://_/subscribe");
+    expect(subRes.status).toBe(200);
+
+    // Detached reader loop — keep draining so the DO's writes against
+    // this writer resolve immediately (no backpressure). The frames
+    // array captures everything that lands.
+    const reader = subRes.body!.getReader();
+    const decoder = new TextDecoder();
+    const frames: string[] = [];
+    void (async () => {
+      try {
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          if (value !== undefined) frames.push(decoder.decode(value));
+        }
+      } catch {
+        // cancellation is expected at teardown
+      }
+    })();
+
+    // Let the initial `: connected` sentinel land before firing the claim.
+    await new Promise((r) => setTimeout(r, 20));
+
+    const res = await postClaim("mis_ecom_daily_purchase_3", token);
+    expect(res.status).toBe(200);
+
+    // Poll for all three SSE event types — the broadcast is detached via
+    // ctx.waitUntil, so the post above can return before the broadcast
+    // completes. 3s budget absorbs D1 + the per-broadcast 2s SSE_HUB
+    // ceiling on workerd.
+    const allThreeDelivered = await Promise.race([
+      (async () => {
+        while (true) {
+          const text = frames.join("");
+          const hasClaimed = text.includes('"type":"mission.claimed"');
+          const hasReward = text.includes('"type":"reward.granted"');
+          const hasBalance = text.includes('"type":"balance.changed"');
+          if (hasClaimed && hasReward && hasBalance) return true;
+          await new Promise((r) => setTimeout(r, 25));
+        }
+      })(),
+      new Promise<false>((r) => setTimeout(() => r(false), 3000)),
+    ]);
+    expect(allThreeDelivered).toBe(true);
+
+    // Bonus: pin the ORDERING. mission.claimed MUST appear in the wire
+    // before reward.granted so the UI flips the card to disabled before
+    // the toast lands. (We collapse all frame text to find the first
+    // occurrence of each type marker.)
+    const joined = frames.join("");
+    const idxClaimed = joined.indexOf('"type":"mission.claimed"');
+    const idxReward = joined.indexOf('"type":"reward.granted"');
+    expect(idxClaimed).toBeGreaterThanOrEqual(0);
+    expect(idxReward).toBeGreaterThanOrEqual(0);
+    expect(idxClaimed).toBeLessThan(idxReward);
+
+    // Bonus: the mission.claimed payload must carry the post-claim
+    // progress shape (status: "claimed") — that's what flips the card.
+    expect(joined).toMatch(
+      /"type":"mission\.claimed"[^}]*"data":\{[^}]*"status":"claimed"/,
+    );
+
+    // Cleanup the subscriber so the stream settles.
+    try {
+      await reader.cancel();
+    } catch {
+      // ignore
+    }
+  });
+
   it("claim still commits the D1 transaction when SSE_HUB hangs (balance + status are correct)", async () => {
     // Defence-in-depth: the response shape is right, the DB row is also
     // right. A future regression that returns optimistic data without

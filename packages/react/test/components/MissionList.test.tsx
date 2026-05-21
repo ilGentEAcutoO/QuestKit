@@ -203,13 +203,11 @@ describe("missionList", () => {
     };
     const client = makeFakeClient({
       getMissions: jest.fn().mockResolvedValue({ missions, progress }),
-      fireEvent: jest
-        .fn()
-        .mockResolvedValue({
-          accepted: true,
-          eventId: "e",
-          missionsUpdated: [],
-        }),
+      fireEvent: jest.fn().mockResolvedValue({
+        accepted: true,
+        eventId: "e",
+        missionsUpdated: [],
+      }),
     });
     const Wrapper = wrapperWith(client);
     const onClaim = jest.fn().mockResolvedValue(undefined);
@@ -226,5 +224,62 @@ describe("missionList", () => {
       fireEvent.click(btn);
     });
     expect(onClaim).toHaveBeenCalledWith("m1");
+  });
+
+  // Phase 9 / TASK-001 Cluster C1 — after onClaim resolves the list MUST
+  // refetch its own missions so the card converges to status="claimed"
+  // even when the SSE `mission.claimed` broadcast drops. The card display
+  // logic already handles the flipped status; this test pins the
+  // belt-and-suspenders behaviour so a regression doesn't reintroduce bug
+  // B1 on /ecommerce (where MissionList owns the useMissions instance and
+  // the route can't reach into its refetch directly).
+  it("refetches its own missions after onClaim resolves (SSE-degraded fallback)", async () => {
+    const initialMissions = [mkMission(1)];
+    const initialProgress: Record<string, MissionProgress> = {
+      m1: mkProgress("m1", "completed"),
+    };
+    // Second fetch returns the same mission but with status="claimed".
+    const claimedProgress: Record<string, MissionProgress> = {
+      m1: mkProgress("m1", "claimed"),
+    };
+    const getMissions = jest
+      .fn()
+      .mockResolvedValueOnce({
+        missions: initialMissions,
+        progress: initialProgress,
+      })
+      .mockResolvedValueOnce({
+        missions: initialMissions,
+        progress: claimedProgress,
+      });
+    const client = makeFakeClient({
+      getMissions,
+      fireEvent: jest.fn().mockResolvedValue({
+        accepted: true,
+        eventId: "e",
+        missionsUpdated: [],
+      }),
+    });
+    const Wrapper = wrapperWith(client);
+    const onClaim = jest.fn().mockResolvedValue(undefined);
+    render(
+      <Wrapper>
+        <MissionList onClaim={onClaim} />
+      </Wrapper>,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(getMissions).toHaveBeenCalledTimes(1);
+    const btn = await screen.findByRole("button", { name: /claim reward/i });
+    await act(async () => {
+      fireEvent.click(btn);
+    });
+    // The wrapper must have invoked the caller's onClaim AND triggered a
+    // self-refetch (second client.getMissions call). The order matters:
+    // the refetch fires after onClaim resolves, so the toast in the host
+    // app lands before the card data is overwritten.
+    expect(onClaim).toHaveBeenCalledWith("m1");
+    expect(getMissions).toHaveBeenCalledTimes(2);
   });
 });

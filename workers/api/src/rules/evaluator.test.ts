@@ -440,3 +440,93 @@ describe("evaluate — defaults", () => {
     expect(result.matched).toBe(true);
   });
 });
+
+// -----------------------------------------------------------------------------
+// Curious Mind regression (TASK-004 / D4) — locks the seed-migration rule
+// shape from migrations/0002_seed_sample_data.sql:103-113. Audit verdict at
+// task time: PASS (rule already correct). These tests prevent silent drift if
+// the seed mission, filter logic, or evaluator semantics ever change.
+// -----------------------------------------------------------------------------
+
+/**
+ * Mission M5 fixture — mirrors exactly the criteria_json of
+ * `mis_stream_documentary_3` (the "Curious Mind" mission). 3 documentaries,
+ * lifetime, eq filter on string field. Reward is a badge — irrelevant to
+ * filter matching but kept for shape parity with the seed row.
+ */
+const M5_CURIOUS_MIND: Mission = {
+  id: "mis_stream_documentary_3",
+  title: "Curious Mind",
+  description: "Watch 3 documentaries",
+  criteria: {
+    eventName: "video.watched",
+    count: 3,
+    window: "lifetime",
+    filter: { genre: { eq: "documentary" } },
+  },
+  reward: { kind: "badge", badgeId: "curious_mind" },
+};
+
+describe("evaluate — Curious Mind regression (D4)", () => {
+  it("documentary genre matches (first watch → locked → active 1/3)", () => {
+    const event = makeEvent({
+      name: "video.watched",
+      payload: { genre: "documentary", duration_sec: 1800 },
+    });
+    const result = evaluate(event, M5_CURIOUS_MIND, null, NOW);
+    expect(result.matched).toBe(true);
+    expect(result.newCurrentCount).toBe(1);
+    expect(result.status).toBe("active");
+    expect(result.updatedProgress).toEqual<MissionProgress>({
+      userId: USER,
+      missionId: M5_CURIOUS_MIND.id,
+      status: "active",
+      progress: 1 / 3,
+      currentCount: 1,
+      targetCount: 3,
+      updatedAt: NOW,
+    });
+  });
+
+  it("non-documentary genre does NOT match (drama is excluded)", () => {
+    const event = makeEvent({
+      name: "video.watched",
+      payload: { genre: "drama", duration_sec: 1800 },
+    });
+    const result = evaluate(event, M5_CURIOUS_MIND, null, NOW);
+    expect(result.matched).toBe(false);
+    expect(result.updatedProgress).toBeNull();
+  });
+
+  it("missing genre field does NOT match (host must provide the field)", () => {
+    const event = makeEvent({
+      name: "video.watched",
+      payload: { duration_sec: 1800 },
+    });
+    const result = evaluate(event, M5_CURIOUS_MIND, null, NOW);
+    expect(result.matched).toBe(false);
+    expect(result.updatedProgress).toBeNull();
+  });
+
+  it("third documentary watch (lifetime) → active → completed", () => {
+    const existing: MissionProgress = {
+      userId: USER,
+      missionId: M5_CURIOUS_MIND.id,
+      status: "active",
+      progress: 2 / 3,
+      currentCount: 2,
+      targetCount: 3,
+      // Lifetime mission — even very old progress carries forward.
+      updatedAt: utc(2024, 1, 1, 0, 0, 0, 0),
+    };
+    const event = makeEvent({
+      name: "video.watched",
+      payload: { genre: "documentary", duration_sec: 2400 },
+    });
+    const result = evaluate(event, M5_CURIOUS_MIND, existing, NOW);
+    expect(result.matched).toBe(true);
+    expect(result.newCurrentCount).toBe(3);
+    expect(result.status).toBe("completed");
+    expect(result.updatedProgress?.progress).toBe(1);
+  });
+});

@@ -167,6 +167,51 @@ describe("useMissions", () => {
     expect(result.current.data?.progress.m1).toEqual(done);
   });
 
+  // TASK-001 / Cluster C1 — the claim broadcast event. After POST
+  // /v1/missions/:id/claim the API emits `mission.claimed` with the
+  // post-claim progress (status: "claimed"). The hook must treat this as
+  // terminal — unconditional overwrite — so the MissionCard sees the
+  // flipped status and renders the disabled "Claimed" button. Without
+  // this handler the card stays at "Claim" forever even though the claim
+  // succeeded (this is exactly bug B1 on /ecommerce).
+  it("patches progress on mission.claimed SSE", async () => {
+    let push: ((u: SDKUpdate) => void) | null = null;
+    const client = makeFakeClient({
+      getMissions: jest.fn().mockResolvedValue({
+        missions: [mission1],
+        progress: {
+          m1: {
+            ...progress1,
+            status: "completed",
+            currentCount: 5,
+            progress: 1,
+          },
+        },
+      }),
+      subscribe: jest.fn().mockImplementation((cb: (u: SDKUpdate) => void) => {
+        push = cb;
+        return jest.fn();
+      }),
+    });
+    const { result } = renderHook(() => useMissions(), {
+      wrapper: wrapperWith(client),
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    const claimed: MissionProgress = {
+      ...progress1,
+      status: "claimed",
+      currentCount: 5,
+      progress: 1,
+      updatedAt: 999,
+    };
+    act(() => {
+      push?.({ type: "mission.claimed", data: claimed });
+    });
+    expect(result.current.data?.progress.m1).toEqual(claimed);
+    expect(result.current.data?.progress.m1?.status).toBe("claimed");
+  });
+
   it("ignores non-mission updates", async () => {
     let push: ((u: SDKUpdate) => void) | null = null;
     const response = {
@@ -374,6 +419,68 @@ describe("useMissions", () => {
 
       // Existing mission state is untouched.
       expect(result.current.data?.progress.m1).toEqual(progress1);
+    });
+
+    // TASK-007 / Cluster C6 — regression for D3 (non-qualifying events).
+    //
+    // The server-side rule engine (`workers/api/src/rules/index.ts ::
+    // evaluateEvent`) only returns missions whose `evaluate()` returned
+    // `matched: true` (event name + filter + window + expiry all pass). The
+    // `/v1/events` route then forwards `updated.map(p => p.missionId)` as
+    // `missionsUpdated` in the response body. The SDK
+    // (`packages/core/src/client.ts :: buildSendFn`) takes that array as-is
+    // and passes it straight to every `onFireEventSuccess` listener — no
+    // local filtering, no fan-out across all active missions.
+    //
+    // ⇒ The optimistic bump in this hook will NEVER fire for a mission
+    //    whose rule predicate didn't match the event. Therefore D3
+    //    ("non-qualifying events bump unrelated missions") is a non-bug:
+    //    the contract makes it structurally impossible.
+    //
+    // This test pins that contract: when the SDK reports an update list
+    // that excludes mission `m2`, only `m1` advances and `m2` stays at its
+    // original count. If a future refactor ever broke that contract (e.g.
+    // by fanning out across all known IDs locally), this regression catches
+    // it before it ships.
+    it("does not bump counter when missionsUpdated does not include the mission", async () => {
+      const mission2: Mission = { ...mission1, id: "m2" };
+      const progress2: MissionProgress = { ...progress1, missionId: "m2" };
+      let pushOptimistic: ((ids: string[]) => void) | null = null;
+      const client = makeFakeClient({
+        getMissions: jest.fn().mockResolvedValue({
+          missions: [mission1, mission2],
+          progress: { m1: progress1, m2: progress2 },
+        }),
+        onFireEventSuccess: jest
+          .fn()
+          .mockImplementation((cb: (ids: string[]) => void) => {
+            pushOptimistic = cb;
+            return jest.fn();
+          }),
+      });
+      const { result } = renderHook(() => useMissions(), {
+        wrapper: wrapperWith(client),
+      });
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+      // Server says: only m1 was affected by this event. m2's rule
+      // didn't match, so its ID is absent from the list.
+      act(() => pushOptimistic?.(["m1"]));
+
+      // m1 advances by the optimistic +1.
+      expect(result.current.data?.progress.m1?.currentCount).toBe(
+        progress1.currentCount + 1,
+      );
+      // m2 must NOT be touched — same currentCount, same updatedAt, same
+      // status. Doing an `.toEqual` here would over-match if a future
+      // refactor copies fields around; assert the load-bearing fields.
+      expect(result.current.data?.progress.m2?.currentCount).toBe(
+        progress2.currentCount,
+      );
+      expect(result.current.data?.progress.m2?.updatedAt).toBe(
+        progress2.updatedAt,
+      );
+      expect(result.current.data?.progress.m2?.status).toBe(progress2.status);
     });
 
     it("does nothing before initial data has loaded", async () => {

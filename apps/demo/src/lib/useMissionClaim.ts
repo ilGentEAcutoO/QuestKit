@@ -13,24 +13,66 @@
  * wire onClaim entirely, so the Claim button fired its analytics ping
  * but never POSTed /v1/missions/:id/claim. Surfaced by the live
  * click-through PDCA sweep.
+ *
+ * Refetch fallback (Phase 9 / TASK-001 Cluster C1):
+ *   The API broadcasts `mission.claimed` + `reward.granted` (+ optional
+ *   `balance.changed`) over SSE after a successful claim, and the SDK's
+ *   `useMissions` listener flips `progress[id].status` to "claimed" so
+ *   the card disables. BUT: that broadcast is best-effort and detached
+ *   via `waitUntil`, so a wedged SSE_HUB DO can silently drop all three
+ *   events. The user EXPLICITLY requested a belt-and-suspenders refetch
+ *   here so the UI always converges after a 200 from the claim API —
+ *   without it, bug B1 returns the moment SSE is degraded. Routes pass
+ *   `onClaimed` wired to their `useMissions().refetch`.
  */
+import type { Reward } from "@questkit/types";
 import { useQuestKit } from "@questkit/react";
 import { useCallback } from "react";
 
 import { useDemoToast } from "../components/DemoToastHost";
 
-export function useMissionClaim(): (missionId: string) => Promise<void> {
+export interface UseMissionClaimOpts {
+  /**
+   * Called after a successful `client.claimMission` resolves. Routes wire
+   * this to `useMissions().refetch` so the MissionCard converges to
+   * `status === "claimed"` even when SSE drops the `mission.claimed`
+   * event (best-effort + `waitUntil`-detached on the API side).
+   *
+   * Failures inside `onClaimed` are swallowed so they never block the
+   * toast — the refetch is a backstop, not the primary signal path.
+   */
+  onClaimed?: () => void | Promise<void>;
+}
+
+export function useMissionClaim(
+  opts: UseMissionClaimOpts = {},
+): (missionId: string) => Promise<void> {
   const client = useQuestKit();
   const { show: showToast } = useDemoToast();
+  const { onClaimed } = opts;
   return useCallback(
     async (missionId: string): Promise<void> => {
       try {
         const result = await client.claimMission(missionId);
-        showToast(result.reward);
+        // Reward toast first — the card has already flipped to disabled
+        // via the SSE `mission.claimed` event in the healthy path. The
+        // refetch fallback below runs in parallel for the SSE-degraded
+        // path so the card converges even when no event lands.
+        showToast(result.reward as Reward);
+        // Fire-and-forget refetch — never block the user on it, never let
+        // its error surface (the claim already succeeded, the toast
+        // already rendered, the refetch is purely defensive).
+        if (onClaimed !== undefined) {
+          try {
+            await onClaimed();
+          } catch (err) {
+            console.warn("[demo] onClaimed refetch failed", err);
+          }
+        }
       } catch (err) {
         console.warn("[demo] claimMission failed", err);
       }
     },
-    [client, showToast],
+    [client, showToast, onClaimed],
   );
 }

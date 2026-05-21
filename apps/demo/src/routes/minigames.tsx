@@ -5,6 +5,22 @@
  * a reasonable set of slices for the wheel and a celebratory prize for
  * the scratch card. Each component is keyboard accessible and respects
  * `prefers-reduced-motion`.
+ *
+ * Reward honesty (Phase 9 / TASK-003 — B5):
+ *   Migration 0004 wires `qk.minigame.spin` → `mis_lucky_spinner` and
+ *   `qk.minigame.scratch` → `mis_scratch_master`, both of which carry
+ *   `reward_json = {"kind":"badge", ...}`. `POST /v1/events` never
+ *   writes to the balances table (currency mints are gated behind
+ *   `POST /v1/missions/:id/claim` with a currency-kind reward — see
+ *   `workers/api/src/db/schema.ts::claimMission`). So a toast that says
+ *   "+30 coin" after a scratch would be a LIE — the coin never lands.
+ *
+ *   This route now hands a badge-shaped reward to the toast surface
+ *   and to `setLastWheelLabel`, so the visible celebration matches the
+ *   ground truth (every spin/scratch ticks the badge mission progress;
+ *   no currency moves until a future Phase 10 makes that explicit).
+ *   Slice labels stay visually varied so the wheel still feels like a
+ *   wheel; the rewards under the hood are all `lucky_spinner` badge.
  */
 import {
   ScratchCard,
@@ -17,40 +33,49 @@ import { type ReactElement, useState } from "react";
 import { useDemoToast } from "../components/DemoToastHost";
 import { SceneHeading } from "../components/SceneHeading";
 
+/**
+ * Wheel slices — every reward is the Lucky Spinner badge.
+ *
+ * The labels are purely cosmetic celebration text that decorate the
+ * SVG slice; the actual reward (passed to `onSpin` → `showToast`) is
+ * always `{kind:"badge", badgeId:"lucky_spinner"}` because that's
+ * what the server-side `mis_lucky_spinner` mission grants. Keeping
+ * 6 distinct labels preserves the visual variety of the wheel.
+ */
 const WHEEL_SLICES: SpinWheelSlice[] = [
   {
-    label: "+10 coin",
-    reward: { kind: "currency", currency: "coin", amount: 10 },
+    label: "Lucky spin!",
+    reward: { kind: "badge", badgeId: "lucky_spinner" },
     weight: 4,
     color: "#f59e0b",
   },
   {
-    label: "+25 coin",
-    reward: { kind: "currency", currency: "coin", amount: 25 },
+    label: "Streak +1!",
+    reward: { kind: "badge", badgeId: "lucky_spinner" },
     weight: 3,
     color: "#10b981",
   },
   {
-    label: "+50 coin",
-    reward: { kind: "currency", currency: "coin", amount: 50 },
+    label: "Sparkle!",
+    reward: { kind: "badge", badgeId: "lucky_spinner" },
     weight: 2,
     color: "#3b82f6",
   },
   {
-    label: "+1 gem",
-    reward: { kind: "currency", currency: "gem", amount: 1 },
+    label: "Bonus tick!",
+    reward: { kind: "badge", badgeId: "lucky_spinner" },
     weight: 1,
     color: "#8b5cf6",
   },
   {
-    label: "Badge",
+    label: "Big spin!",
     reward: { kind: "badge", badgeId: "lucky_spinner" },
     weight: 1,
     color: "#ef4444",
   },
   {
-    label: "+5 coin",
-    reward: { kind: "currency", currency: "coin", amount: 5 },
+    label: "Top combo!",
+    reward: { kind: "badge", badgeId: "lucky_spinner" },
     weight: 4,
     color: "#06b6d4",
   },
@@ -96,10 +121,12 @@ export function MiniGamesRoute(): ReactElement {
               showToast(reward);
               // Fire a synthetic event so the EventLog drawer reflects
               // the spin in the same live-update timeline as ecommerce
-              // purchases and daily check-ins. The server has no mission
-              // matching `qk.minigame.spin`, so the event is recorded but
-              // no mission progress is broadcast — the visual celebration
-              // is the entire payoff here.
+              // purchases and daily check-ins. This event matches
+              // server-side mission `mis_lucky_spinner` (migration
+              // 0004): each spin advances badge progress by 1, and the
+              // 5th completes the mission. No currency is minted by
+              // this event — coin mints only happen on the claim
+              // endpoint when the mission's reward is currency-kind.
               void fireEvent({
                 name: "qk.minigame.spin",
                 payload: {
@@ -141,7 +168,7 @@ export function MiniGamesRoute(): ReactElement {
                   🎁
                 </span>
                 <span className="text-lg font-bold text-[color:var(--color-qk-primary)]">
-                  +30 coin
+                  Scratch Master
                 </span>
                 <span className="text-xs text-[color:var(--color-demo-muted)]">
                   Tap and drag to reveal
@@ -150,10 +177,13 @@ export function MiniGamesRoute(): ReactElement {
             }
             onReveal={() => {
               setScratchRevealed(true);
-              showToast({ kind: "currency", currency: "coin", amount: 30 });
+              // Honest reward shape — matches `mis_scratch_master` from
+              // migration 0004. Coin minting is NOT triggered by event
+              // ingest; see file-level comment for the contract.
+              showToast({ kind: "badge", badgeId: "scratch_master" });
               void fireEvent({
                 name: "qk.minigame.scratch",
-                payload: { game: "scratch_card", amount: 30 },
+                payload: { game: "scratch_card" },
               });
             }}
           />
@@ -163,7 +193,7 @@ export function MiniGamesRoute(): ReactElement {
             aria-live="polite"
           >
             {scratchRevealed
-              ? "Won: +30 coin"
+              ? "Reveal complete! Scratch Master progress +1."
               : "Drag your finger or mouse across the card."}
           </p>
         </section>
@@ -192,8 +222,9 @@ export function MiniGamesRoute(): ReactElement {
             DevTools panel to see them re-skin.
           </li>
           <li>
-            Wins emit a reward via <code>useRewardClaimToast</code> — same
-            surface the API uses on a real claim.
+            Each spin ticks the <strong>Lucky Spinner</strong> badge mission;
+            each scratch ticks <strong>Scratch Master</strong>. No currency is
+            minted by these events — the badge unlocks on claim.
           </li>
           <li>
             The cooldown is persisted to <code>localStorage</code> per wheel id;

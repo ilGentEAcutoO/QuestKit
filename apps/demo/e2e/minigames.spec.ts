@@ -1,12 +1,18 @@
 /**
- * Mini-games E2E suite — Phase 8 / TASK-009.
+ * Mini-games E2E suite — Phase 8 / TASK-009 + Phase 9 / TASK-003.
  *
- * Covers SpinWheel + ScratchCard:
- *   - Spin animates, reward toast surfaces, fires qk.minigame.spin,
- *     advances mis_lucky_spinner (count=5).
- *   - Scratch reveals on pointer drag (or key press), fires
- *     qk.minigame.scratch, advances mis_scratch_master (count=3) — 3
- *     reveals reaches 3/3 + Claim.
+ * Phase 9 / TASK-003 (toast honesty regression — B5):
+ *   The demo's minigame toast used to claim "+10 coin" / "+30 coin" but the
+ *   server-side missions (`mis_lucky_spinner`, `mis_scratch_master` —
+ *   migrations/0004) award BADGES, and `POST /v1/events` never mints
+ *   currency. These tests pin that no toast / caption surface mentions
+ *   "coin" after a spin or scratch reveal — the toast must reference the
+ *   badge or the mission, never an imaginary currency.
+ *
+ * Original (Phase 8) coverage retained:
+ *   - Spin animates, fires `qk.minigame.spin`, advances `mis_lucky_spinner`.
+ *   - Scratch reveals on keyboard, fires `qk.minigame.scratch`, advances
+ *     `mis_scratch_master` (3 reveals → 3/3).
  *
  * Migrations 0003 + 0004 define the missions; we applied them in
  * TASK-008 so they exist in prod D1.
@@ -94,10 +100,18 @@ test.describe("Mini-games — Spin + Scratch", () => {
     await canvas.focus();
     await page.keyboard.press("Space");
 
-    // The "Won: +30 coin" caption appears once onReveal fires.
-    await expect(page.getByText(/Won: \+30 coin/i)).toBeVisible({
-      timeout: 8_000,
-    });
+    // The post-reveal caption surfaces once onReveal fires. After
+    // TASK-003 the caption no longer claims a currency amount — we
+    // assert it transitions OUT of the pre-reveal hint and lands on a
+    // badge-themed string. The exact prose can evolve, but it must NOT
+    // contain "coin" (that was the lie).
+    const caption = page
+      .locator('section[aria-labelledby="scratch-heading"] p[aria-live]')
+      .first();
+    await expect(caption).not.toHaveText(
+      /Drag your finger or mouse across the card\./i,
+      { timeout: 8_000 },
+    );
 
     expect(consoleErrors).toEqual([]);
   });
@@ -120,10 +134,16 @@ test.describe("Mini-games — Spin + Scratch", () => {
       await expect(canvas).toBeVisible({ timeout: 8_000 });
       await canvas.focus();
       await page.keyboard.press("Space");
-      // Wait for the toast / "Won:" caption so we know onReveal landed.
-      await expect(page.getByText(/Won: \+30 coin/i)).toBeVisible({
-        timeout: 8_000,
-      });
+      // Wait for the post-reveal caption transition so we know onReveal
+      // landed. The text no longer mentions a coin amount — we just wait
+      // for the pre-reveal hint to disappear.
+      const caption = page
+        .locator('section[aria-labelledby="scratch-heading"] p[aria-live]')
+        .first();
+      await expect(caption).not.toHaveText(
+        /Drag your finger or mouse across the card\./i,
+        { timeout: 8_000 },
+      );
       // Brief settle so the next POST /v1/events has time to fire
       // before we navigate away.
       await page.waitForTimeout(800);
@@ -142,6 +162,113 @@ test.describe("Mini-games — Spin + Scratch", () => {
     await expect(
       scratchMaster.locator(".qk-mission-card-progress-text"),
     ).toContainText("3 / 3", { timeout: 10_000 });
+
+    expect(consoleErrors).toEqual([]);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Phase 9 / TASK-003 — toast honesty regression (B5)
+  // ---------------------------------------------------------------------------
+
+  test("TASK-003: spin wheel toast + caption mention NO coin (badge-only reward)", async ({
+    page,
+    consoleErrors,
+  }) => {
+    // RED-first regression: before TASK-003 the wheel rendered slices
+    // labelled "+10 coin", "+25 coin", "+50 coin", etc. and showToast()
+    // displayed "+N coin", which is a LIE — the server-side mission
+    // mis_lucky_spinner awards a badge, not currency, and POST /v1/events
+    // never mints coin regardless of event name.
+    //
+    // After the fix:
+    //   - Every wheel slice's reward is `{kind:"badge", badgeId:"lucky_spinner"}`
+    //   - The toast renders "Badge: lucky_spinner" (DemoToastHost format)
+    //   - The "Won: <label>" caption uses celebration labels that never
+    //     claim a coin amount
+    await page.goto("/minigames");
+
+    const spinBtn = page.getByRole("button", { name: /spin the wheel/i });
+    await expect(spinBtn).toBeVisible({ timeout: 8_000 });
+    await spinBtn.click();
+
+    // Wait for the "Won:" caption to appear.
+    const wonCaption = page.getByText(/Won:/i).first();
+    await expect(wonCaption).toBeVisible({ timeout: 8_000 });
+
+    // Hard contract: the caption text MUST NOT contain "coin" anywhere.
+    // We pull the text and assert on substring (case-insensitive) — using
+    // toHaveText with a negation regex would fail on every non-match,
+    // not just the targeted regression.
+    const captionText = (await wonCaption.textContent()) ?? "";
+    expect(captionText.toLowerCase()).not.toContain("coin");
+
+    // The toast is rendered into a portal at <body>. We locate it via the
+    // role="status" landmark + aria-live region. Allow up to 5s for the
+    // toast to mount because DemoToastHost uses framer-motion AnimatePresence.
+    const toastStatus = page.locator('[role="status"]', {
+      hasText: /badge|lucky|spinner/i,
+    });
+    await expect(toastStatus.first()).toBeVisible({ timeout: 5_000 });
+
+    // Pin the contents of every visible toast: no "coin", no "+N".
+    const allToastTexts = await page
+      .locator('[role="status"]')
+      .allTextContents();
+    for (const text of allToastTexts) {
+      expect(text.toLowerCase()).not.toContain("coin");
+    }
+
+    expect(consoleErrors).toEqual([]);
+  });
+
+  test("TASK-003: scratch card toast + caption + prize render NO coin (badge-only)", async ({
+    page,
+    consoleErrors,
+  }) => {
+    // Mirror of the spin assertion. The scratch prize panel used to read
+    // "+30 coin" and the toast claimed +30 coin too — both LIES because
+    // mis_scratch_master grants a badge. After TASK-003:
+    //   - prize panel shows badge-themed text (no "+N coin")
+    //   - onReveal toast renders "Badge: scratch_master"
+    //   - "Won:" caption is badge-themed
+    await page.goto("/minigames");
+
+    // The pre-reveal scratch prize panel (the content under the overlay)
+    // must not contain "+N coin". Reading inner text of the scratch
+    // section catches the prize visual even before the reveal.
+    const scratchSection = page.locator(
+      'section[aria-labelledby="scratch-heading"]',
+    );
+    await expect(scratchSection).toBeVisible({ timeout: 8_000 });
+    const preRevealText = (await scratchSection.textContent()) ?? "";
+    expect(preRevealText.toLowerCase()).not.toContain("coin");
+
+    // Reveal via keyboard.
+    const canvas = page.locator('[data-testid="qk-scratchcard-canvas"]');
+    await canvas.focus();
+    await page.keyboard.press("Space");
+
+    // The "Won:" or post-reveal caption must not say "coin".
+    const caption = scratchSection.locator("p[aria-live]").first();
+    await expect(caption).not.toHaveText(
+      /Drag your finger or mouse across the card\./i,
+      { timeout: 8_000 },
+    );
+    const captionText = (await caption.textContent()) ?? "";
+    expect(captionText.toLowerCase()).not.toContain("coin");
+
+    // Toast carries the scratch_master badge or a badge-themed string.
+    const toastStatus = page.locator('[role="status"]', {
+      hasText: /badge|scratch|master/i,
+    });
+    await expect(toastStatus.first()).toBeVisible({ timeout: 5_000 });
+
+    const allToastTexts = await page
+      .locator('[role="status"]')
+      .allTextContents();
+    for (const text of allToastTexts) {
+      expect(text.toLowerCase()).not.toContain("coin");
+    }
 
     expect(consoleErrors).toEqual([]);
   });

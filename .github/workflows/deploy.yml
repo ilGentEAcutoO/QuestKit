@@ -284,6 +284,15 @@ jobs:
           # webServer block (no dev server in CI here).
           E2E_TARGET: prod
           CI: "true"
+          # TASK-005 / Phase 9 — Bypass Cloudflare Bot Management on
+          # POST /api/token for CI runner IPs. The matching WAF custom rule
+          # on zone `jairukchan.com` skips Super Bot Fight Mode + Managed
+          # Rules only when this header value matches the secret. Playwright
+          # reads this env var in playwright.config.ts and attaches the
+          # header `x-questkit-ci-bypass` to every prod-mode request.
+          # See docs/SELF_HOSTING.md §8.6 for the WAF rule expression and
+          # rotation procedure. Token format: 32-byte hex (openssl rand -hex 32).
+          CI_BOT_BYPASS_TOKEN: ${{ secrets.CI_BOT_BYPASS_TOKEN }}
 
       # On failure, upload the Playwright HTML report so a maintainer can
       # download it from the workflow run page and inspect screenshots,

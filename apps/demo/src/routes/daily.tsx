@@ -1,10 +1,12 @@
 /**
  * Daily streak scenario — single "Check In" CTA that fires daily.login.
  *
- * The mission rule engine maintains the streak server-side (the daily
- * window resets at UTC midnight). For demo UX we mirror it locally so
- * the counter pops the moment a click lands — the source of truth still
- * comes from useMissions on next refetch.
+ * Source of truth: the server-side Daily Visitor mission (mis_daily_visitor,
+ * migration 0003 — eventName="daily.login", count=1, window=daily). The
+ * route reads from useMissions() so the streak hero always agrees with
+ * the MissionCard below, including the post-claim "Already checked in"
+ * state. Phase 9 / TASK-002 removed the localStorage mirror that used to
+ * drift from server state and caused bug B4 — there's now ONE source.
  */
 import { MissionCard, useEvent, useMissions } from "@questkit/react";
 
@@ -14,40 +16,11 @@ import { SceneHeading } from "../components/SceneHeading";
 
 import { useMissionClaim } from "../lib/useMissionClaim";
 
-const STREAK_STORAGE_KEY = "qk-demo-daily-streak";
-
-interface StreakState {
-  count: number;
-  lastTimestamp: number | null;
-}
-
-function readStreak(): StreakState {
-  if (typeof window === "undefined") return { count: 0, lastTimestamp: null };
-  try {
-    const raw = window.localStorage.getItem(STREAK_STORAGE_KEY);
-    if (raw === null) return { count: 0, lastTimestamp: null };
-    const parsed = JSON.parse(raw) as Partial<StreakState>;
-    if (typeof parsed.count !== "number" || parsed.count < 0) {
-      return { count: 0, lastTimestamp: null };
-    }
-    return {
-      count: parsed.count,
-      lastTimestamp:
-        typeof parsed.lastTimestamp === "number" ? parsed.lastTimestamp : null,
-    };
-  } catch {
-    return { count: 0, lastTimestamp: null };
-  }
-}
-
-function writeStreak(state: StreakState): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(STREAK_STORAGE_KEY, JSON.stringify(state));
-  } catch {
-    // localStorage unavailable (private mode, quota) — silently degrade.
-  }
-}
+// Mission whose progress drives the streak hero. Pinned to the Daily
+// Visitor mission added in migration 0003 — eventName="daily.login",
+// count=1, window=daily. The currentCount semantics: 1 after today's
+// check-in lands; reset to 0 by the rule engine at the next UTC midnight.
+const DAILY_MISSION_ID = "mis_daily_visitor";
 
 function startOfDay(now: number): number {
   const d = new Date(now);
@@ -57,28 +30,55 @@ function startOfDay(now: number): number {
 
 export function DailyRoute(): ReactElement {
   const { fireEvent, isFiring } = useEvent();
-  const handleClaim = useMissionClaim();
-  const [streak, setStreak] = useState<StreakState>(() => readStreak());
   const [justClicked, setJustClicked] = useState<boolean>(false);
 
-  // Reuse useMissions to surface the daily-related missions further down.
+  // Reuse useMissions to surface the daily-related missions further down
+  // AND to derive the streak hero count. The Daily Visitor mission lives
+  // in the e-commerce campaign per migration 0003 (the demo doesn't have a
+  // dedicated daily campaign — see that migration's docstring).
   const missions = useMissions({ campaignId: "camp_ecom_2026q2" });
 
+  // Wire the claim handler with a refetch fallback so the UI converges to
+  // status="claimed" even if the SSE `mission.claimed` event drops — see
+  // useMissionClaim's docstring (Phase 9 / TASK-001 Cluster C1).
+  const handleClaim = useMissionClaim({ onClaimed: missions.refetch });
+
+  // Derive both the hero count and claimedToday from server state. The
+  // daily mission has count=1/window=daily — currentCount is NOT a
+  // multi-day streak counter (the server doesn't track consecutive days
+  // for v0.1), it's just "have you checked in within today's UTC window".
+  //
+  // claimedToday: gated on `updatedAt` falling in today's UTC window AND
+  // currentCount > 0. Without the window gate, a returning user who
+  // claimed yesterday would see "Already checked in today" on a fresh
+  // visit today — exactly the localStorage-era bug we're fixing. The
+  // rule engine resets the row on the first daily.login fired in a new
+  // window (see workers/api/src/rules/evaluator.ts:99-125), so once
+  // today's check-in lands, updatedAt + currentCount swing into today's
+  // window.
+  //
+  // streakCount: 1 when claimedToday, 0 otherwise. We deliberately don't
+  // try to surface a multi-day "consecutive streak" — the server schema
+  // doesn't carry that yet. Math.min vs the target clamps defensively.
+  const dailyProgress = missions.data?.progress[DAILY_MISSION_ID];
+  const target = dailyProgress?.targetCount ?? 1;
   const today = startOfDay(Date.now());
   const claimedToday =
-    streak.lastTimestamp !== null && startOfDay(streak.lastTimestamp) === today;
+    dailyProgress !== undefined &&
+    startOfDay(dailyProgress.updatedAt) === today &&
+    dailyProgress.currentCount > 0;
+  const streakCount = claimedToday
+    ? Math.min(dailyProgress.currentCount, target)
+    : 0;
 
   async function handleCheckIn(): Promise<void> {
     if (claimedToday) return;
     setJustClicked(true);
     try {
       await fireEvent({ name: "daily.login", payload: {} });
-      const next: StreakState = {
-        count: streak.count + 1,
-        lastTimestamp: Date.now(),
-      };
-      setStreak(next);
-      writeStreak(next);
+      // No local state to write — useMissions handles the optimistic
+      // +1 bump on a successful fireEvent (TASK-006). The next SSE
+      // delivery (or refetch) reconciles the exact server timestamp.
     } catch {
       // Event-log surfaces failures.
     } finally {
@@ -114,20 +114,20 @@ export function DailyRoute(): ReactElement {
             </p>
             <p className="mt-1 flex items-baseline gap-2">
               <motion.span
-                key={streak.count}
+                key={streakCount}
                 initial={{ scale: 0.7, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
                 transition={{ type: "spring", stiffness: 240, damping: 20 }}
                 className="text-5xl font-bold tabular-nums"
                 style={{ color: "var(--color-qk-primary)" }}
               >
-                {streak.count}
+                {streakCount}
               </motion.span>
               <span
                 className="text-base font-medium"
                 style={{ color: "var(--color-demo-muted)" }}
               >
-                day{streak.count === 1 ? "" : "s"}
+                day{streakCount === 1 ? "" : "s"}
               </span>
             </p>
             <p

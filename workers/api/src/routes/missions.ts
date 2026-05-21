@@ -23,13 +23,21 @@
  *     `db/schema.ts#claimMission`. Broadcasts an SDKUpdate over SSE_HUB
  *     (best-effort: a broken hub is logged but does not fail the claim).
  *
- * ## SSE broadcast variant
+ * ## SSE broadcast variants (Phase 9 / TASK-001)
  *
- * The SDKUpdate union (packages/types/src/sdk-update.ts) doesn't have a
- * dedicated `mission.claimed` variant. We use `reward.granted` for the claim
- * itself (carries userId + reward + missionId) and additionally broadcast a
- * `balance.changed` event when balance is non-null. See the report for the
- * flag to TASK-002.
+ * On a fresh claim we broadcast THREE events in this order (each best-effort):
+ *
+ *   1. `mission.claimed`   — terminal status flip (UI flips card to "Claimed"
+ *                            FIRST so subsequent toasts land on a disabled
+ *                            button; ordering matters for UX).
+ *   2. `reward.granted`    — toast trigger (userId + reward + missionId).
+ *   3. `balance.changed`   — currency rewards only; refreshes BalanceBadge etc.
+ *
+ * Before TASK-001 we omitted (1) and relied on `reward.granted` to do double
+ * duty as "claim happened". The hook didn't subscribe to that variant, so the
+ * card stayed at "Claim" forever — exactly bug B1. With (1) in place,
+ * `useMissions`'s subscriber flips `progress[missionId].status` to "claimed"
+ * and the card re-renders with the disabled "Claimed" button.
  *
  * ## Rate-limiter note
  *
@@ -198,28 +206,57 @@ const SSE_HUB_TIMEOUT_MS = 2000;
  * the gap on reconnect (the SDK polls /v1/missions and /v1/balance on a
  * reconnect to reconcile state).
  *
- * Broadcasts BOTH `reward.granted` AND (if currency reward) `balance.changed`
- * — the SDKUpdate union doesn't have a dedicated `mission.claimed` variant,
- * so we split the semantic into the two closest existing variants. Flag
- * documented in the route's file-level JSDoc.
+ * Phase 9 / TASK-001 (Cluster C1) broadcasts THREE events in order:
+ *   1. `mission.claimed`  — carries post-claim `MissionProgress` (status =
+ *      "claimed"). Emitted FIRST so `useMissions` flips the card state to
+ *      "Claimed" before any toast lands.
+ *   2. `reward.granted`   — userId + reward + missionId for the toast.
+ *   3. `balance.changed`  — only when reward is currency-kind (balance != null).
+ *
+ * Order matters: the UI wants the card disabled BEFORE the celebratory toast
+ * appears, otherwise a flicker is possible.
  *
  * Deadlock hardening (Phase 8 / v0.1.4 TASK-001):
- *   Both stub.fetch calls arm `AbortSignal.timeout(2000)` so a wedged DO
+ *   All stub.fetch calls arm `AbortSignal.timeout(2000)` so a wedged DO
  *   never holds the broadcast. The CALLER (the claim route) detaches the
  *   whole tryBroadcastClaim call via `c.executionCtx.waitUntil(...)` so
  *   even broadcast latency in the healthy-but-slow case doesn't gate the
- *   client response.
+ *   client response. If the DO is wedged so badly that all three broadcasts
+ *   silently drop, the demo's `useMissionClaim` refetches `/v1/missions`
+ *   after the API returns 200, providing a belt-and-suspenders fallback.
  */
 async function tryBroadcastClaim(
   env: Env,
   userId: string,
   missionId: string,
+  progress: MissionProgress,
   reward: Reward,
   balance: Balance | null,
 ): Promise<void> {
   try {
     const stubId = env.SSE_HUB.idFromName(userId);
     const stub = env.SSE_HUB.get(stubId);
+
+    // 1. mission.claimed — terminal status flip. MUST go first so the UI
+    //    flips the card to a disabled "Claimed" state before any reward
+    //    toast lands on it. The payload is the authoritative post-claim
+    //    MissionProgress straight from D1, so consumers can overwrite
+    //    unconditionally.
+    const claimedUpdate: SDKUpdate = {
+      type: "mission.claimed",
+      data: progress,
+    };
+    const r0 = await stub.fetch("https://_/broadcast", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(claimedUpdate),
+      signal: AbortSignal.timeout(SSE_HUB_TIMEOUT_MS),
+    });
+    if (r0.status !== 200) {
+      console.warn(`[claim] sse-hub returned unexpected status ${r0.status}`);
+    }
+
+    // 2. reward.granted — drives the toast.
     const rewardUpdate: SDKUpdate = {
       type: "reward.granted",
       data: { userId, reward, missionId },
@@ -233,6 +270,8 @@ async function tryBroadcastClaim(
     if (r1.status !== 200) {
       console.warn(`[claim] sse-hub returned unexpected status ${r1.status}`);
     }
+
+    // 3. balance.changed — currency rewards only.
     if (balance !== null) {
       const balanceUpdate: SDKUpdate = {
         type: "balance.changed",
@@ -317,6 +356,7 @@ missions.post("/:id/claim", async (c) => {
         c.env,
         userId,
         missionId,
+        outcome.progress,
         outcome.reward,
         outcome.balance,
       ),

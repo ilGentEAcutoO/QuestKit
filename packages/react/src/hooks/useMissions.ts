@@ -6,15 +6,16 @@ import { QuestKitError } from "@questkit/core";
 
 /**
  * useMissions — fetch missions + progress and keep `progress` live by
- * folding in `mission.progress` / `mission.completed` SSE updates, plus
- * optimistic `+1` bumps from successful `fireEvent` calls (TASK-006).
+ * folding in `mission.progress` / `mission.completed` / `mission.claimed`
+ * SSE updates, plus optimistic `+1` bumps from successful `fireEvent`
+ * calls (TASK-006).
  *
  * The hook intentionally does NOT mutate the `missions` array on SSE —
  * mission definitions don't change at runtime, only their progress does.
  * If a campaign curator updates a mission server-side, the consumer must
  * call `refetch()`.
  *
- * Merge policy (TASK-006):
+ * Merge policy (TASK-006 + TASK-001):
  *   - SSE `mission.progress`: monotonic on `currentCount` (Math.max with
  *     prev), authoritative on every other field (`status`, `claimedAt`,
  *     `updatedAt`, `progress`, …). This prevents a visible counter
@@ -23,6 +24,12 @@ import { QuestKitError } from "@questkit/core";
  *     event #1, and we must not snap it back to a lower number.
  *   - SSE `mission.completed`: unconditional overwrite. Completion is a
  *     terminal state and we want it to land immediately.
+ *   - SSE `mission.claimed` (Phase 9 / TASK-001 Cluster C1): unconditional
+ *     overwrite. Claim is also terminal — the API emits this AFTER the
+ *     D1 commit, so the payload IS the authoritative post-claim shape
+ *     (status: "claimed", updatedAt: claimTimeMs). We route it through
+ *     the same branch as `mission.completed` so the MissionCard's
+ *     status-driven button state flips immediately.
  *   - Optimistic merge (`onFireEventSuccess`): still `currentCount + 1`,
  *     clamped at `targetCount`. The next authoritative SSE / refetch
  *     reconciles via the monotonic rule above (last-writer-wins on
@@ -87,7 +94,8 @@ export function useMissions(
     const unsub = client.subscribe((update: SDKUpdate) => {
       if (
         update.type !== "mission.progress" &&
-        update.type !== "mission.completed"
+        update.type !== "mission.completed" &&
+        update.type !== "mission.claimed"
       ) {
         return;
       }
@@ -96,10 +104,17 @@ export function useMissions(
       setData((prev) => {
         if (prev === undefined) return prev;
         const existing = prev.progress[p.missionId];
-        // mission.completed is terminal — unconditional overwrite so the
-        // completion state lands immediately even if it would lower a count
-        // (shouldn't happen server-side, but we never block a completion).
-        if (update.type === "mission.completed" || existing === undefined) {
+        // Terminal events (mission.completed / mission.claimed) are
+        // unconditional overwrites so the new terminal state lands
+        // immediately — even if the count would briefly lower (shouldn't
+        // happen server-side, but we never block a terminal transition).
+        // For mission.claimed the server has already committed the D1
+        // transition, so the payload IS the source of truth.
+        if (
+          update.type === "mission.completed" ||
+          update.type === "mission.claimed" ||
+          existing === undefined
+        ) {
           return {
             ...prev,
             progress: { ...prev.progress, [p.missionId]: p },

@@ -129,6 +129,40 @@ describe("missionCard", () => {
     expect(btn).toBeDisabled();
   });
 
+  // TASK-001 / Cluster C1 — pinning the full "claimed" display contract.
+  // This card is the user-visible artefact of the new `mission.claimed`
+  // SSE event: once the hook flips `progress.status` to "claimed", the
+  // card MUST flip its data-status attribute, disable the button, AND
+  // show the literal "Claimed" label. Bug B1 on /ecommerce manifests as
+  // the button staying at "Claim" forever because the status never
+  // flipped — these three checks together prevent a regression.
+  it("renders the full 'claimed' display contract (data-status + disabled + 'Claimed' label)", () => {
+    const client = makeFakeClient();
+    const Wrapper = wrapperWith(client);
+    const { container } = render(
+      <Wrapper>
+        <MissionCard
+          mission={mission}
+          progress={progressWith("claimed", {
+            currentCount: 5,
+            targetCount: 5,
+            progress: 1,
+          })}
+        />
+      </Wrapper>,
+    );
+    // 1. Card root carries data-status="claimed" (the CSS hook used by
+    //    Playwright selectors and any host-page styling).
+    const card = container.querySelector(".qk-mission-card") as HTMLElement;
+    expect(card.getAttribute("data-status")).toBe("claimed");
+    // 2. Button is disabled.
+    const btn = screen.getByRole("button", { name: /already claimed/i });
+    expect(btn).toBeDisabled();
+    // 3. Visible label reads "Claimed" — not "Claim", not "Claiming…".
+    expect(btn).toHaveTextContent("Claimed");
+    expect(btn).not.toHaveTextContent("Claiming");
+  });
+
   it("calls onClaim when the claim button is clicked", async () => {
     const client = makeFakeClient({
       fireEvent: jest.fn().mockResolvedValue({

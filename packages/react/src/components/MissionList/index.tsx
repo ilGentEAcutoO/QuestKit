@@ -19,7 +19,7 @@
  */
 import type { MissionsListOpts } from "@questkit/core";
 import type { ReactElement } from "react";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 
 import { useMissions } from "../../hooks/useMissions";
 import { MissionCard } from "../MissionCard";
@@ -60,6 +60,32 @@ export function MissionList({
   if (limit !== undefined) opts.limit = limit;
 
   const state = useMissions(opts);
+
+  // Wrap the caller's onClaim to also trigger a self-refetch after the
+  // promise resolves. The wire-up exists because the API's claim broadcast
+  // (mission.claimed via SSE) is best-effort + waitUntil-detached — if
+  // the SSE_HUB DO is wedged the event silently drops and the card would
+  // stay at "Claim" forever. Refetching after the API returns guarantees
+  // the card flips to "Claimed" regardless of SSE health. Phase 9 /
+  // TASK-001 Cluster C1 (bug B1).
+  const wrappedOnClaim = useCallback(
+    async (missionId: string): Promise<void> => {
+      if (onClaim === undefined) return;
+      try {
+        await onClaim(missionId);
+      } finally {
+        // Failures inside refetch are non-fatal — the claim already
+        // succeeded server-side; a stale card is preferable to a thrown
+        // exception in the host's render tree.
+        try {
+          await state.refetch();
+        } catch {
+          // ignore — host's `useMissions().error` slot surfaces it.
+        }
+      }
+    },
+    [onClaim, state],
+  );
 
   const rootClass = ["qk-mission-list", "flex flex-col gap-3", className]
     .filter(Boolean)
@@ -162,7 +188,7 @@ export function MissionList({
             key={m.id}
             mission={m}
             progress={p ?? undefined}
-            {...(onClaim !== undefined ? { onClaim } : {})}
+            {...(onClaim !== undefined ? { onClaim: wrappedOnClaim } : {})}
           />
         );
       })}

@@ -72,12 +72,13 @@ test.describe("Streaming — Watch + button latency", () => {
     const stuck = await page.locator('button:has-text("Logging…")').count();
     expect(stuck, "no Watch button stuck on Logging… after 3 s").toBe(0);
 
-    // Also verify the local "watched today" counter advanced (the SPA's
-    // local mirror of the daily progress — increments synchronously on
-    // each click handler in streaming.tsx). Streaming's local counter does
-    // NOT clamp — it'll read "4/3" after 4 clicks. We accept any "N/3"
-    // where N >= 1 (a stricter assertion would race the SPA's setState).
-    await expect(page.getByText(/^[1-9]\d*\/3$/)).toBeVisible({
+    // Also verify the server-derived "watched today" counter advanced.
+    // Phase 9 / TASK-002 wired this widget to useMissions().progress for
+    // mis_stream_documentary_3 (filter: genre=documentary, count=3). Of
+    // the first 4 videos in the library, only Planet Earth III matches,
+    // so we accept any "N/3" where N is in [1, 3] — the optimistic +1
+    // path may bump above the server's eventual reconciled value briefly.
+    await expect(page.getByText(/^[1-3]\/3$/)).toBeVisible({
       timeout: 3_000,
     });
 

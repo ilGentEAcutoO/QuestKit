@@ -36,6 +36,7 @@ const FILTER_OPTIONS: { key: FilterKey; label: string }[] = [
   { key: "all", label: "All" },
   { key: "mission.progress", label: "Progress" },
   { key: "mission.completed", label: "Completed" },
+  { key: "mission.claimed", label: "Claimed" },
   { key: "reward.granted", label: "Reward" },
   { key: "balance.changed", label: "Balance" },
 ];
@@ -46,6 +47,11 @@ function describeUpdate(update: SDKUpdate): string {
       return `mission ${update.data.missionId} → ${Math.round(update.data.progress * 100)}%`;
     case "mission.completed":
       return `mission ${update.data.missionId} completed`;
+    case "mission.claimed":
+      // Phase 9 / TASK-001 — the dedicated claim broadcast. Carries the
+      // post-claim MissionProgress so consumers know the card flipped to
+      // status="claimed" (driving the disabled "Claimed" button).
+      return `mission ${update.data.missionId} claimed`;
     case "reward.granted":
       return update.data.reward.kind === "currency"
         ? `+${update.data.reward.amount} ${update.data.reward.currency}`

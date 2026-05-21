@@ -3,18 +3,21 @@
  *
  * Aligned with the seed missions in 0002:
  *   - Daily Watcher (daily, count 1)
- *   - Documentary Buff (lifetime, genre = "documentary", count 3)
- *   - Marathon Week (weekly, duration_sec >= 1800, count 4)
+ *   - Curious Mind (lifetime, genre = "documentary", count 3)
+ *   - Deep Diver (weekly, duration_sec >= 1800, count 10)
  *
- * The fired payload carries genre + duration so the rule engine sees the
- * filters. We also keep a local counter of "watched today" so the
- * streaming-specific badge unlock at 3 stays visible even when the
- * server is offline (degraded mode demo).
+ * The "Today's progress" widget mirrors the server-side Curious Mind
+ * counter (mis_stream_documentary_3): it's the only 3-target streaming
+ * mission and matches the widget's existing copy ("Hit 3 to unlock the
+ * Binge Starter badge"). Reading from useMissions() means the widget
+ * always agrees with the MissionCard further down, and crucially it
+ * reflects the `status: "claimed"` flip after the user claims — the bug
+ * B3/D1 fix from Phase 9 / TASK-002.
  */
 import { MissionCard, useEvent, useMissions } from "@questkit/react";
 
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { type ReactElement, useState } from "react";
+import { type ReactElement, useEffect, useRef, useState } from "react";
 import { useDemoToast } from "../components/DemoToastHost";
 
 import { SceneHeading } from "../components/SceneHeading";
@@ -76,12 +79,17 @@ const VIDEOS: Video[] = [
 // 7-point ring around the badge — pre-computed angles for deterministic SSR.
 const CONFETTI_ANGLES = [0, 51, 103, 154, 206, 257, 309];
 
+// Mission whose currentCount drives the "Today's progress" widget. Pinned
+// to the 3-target streaming mission (Curious Mind) — see migration 0002.
+// We pick this rather than the 1-target Daily Watcher because the widget's
+// copy explicitly says "Unlock the Binge Starter badge at 3."
+const STREAM_BINGE_MISSION_ID = "mis_stream_documentary_3";
+const STREAM_BINGE_TARGET = 3;
+
 export function StreamingRoute(): ReactElement {
   const { fireEvent, isFiring } = useEvent();
   const { show: showToast } = useDemoToast();
   const reduced = useReducedMotion();
-  const handleClaim = useMissionClaim();
-  const [watchedToday, setWatchedToday] = useState<number>(0);
   const [busy, setBusy] = useState<string | null>(null);
   const [bingeUnlocked, setBingeUnlocked] = useState<boolean>(false);
 
@@ -89,6 +97,57 @@ export function StreamingRoute(): ReactElement {
   // the streaming campaign — the full list lives in the EventLog/missions
   // sections below.
   const missionsState = useMissions({ campaignId: "camp_stream_2026q2" });
+
+  // Wire the claim handler with a refetch fallback so the UI converges to
+  // status="claimed" even if the SSE `mission.claimed` event drops — see
+  // useMissionClaim's docstring (Phase 9 / TASK-001 Cluster C1).
+  const handleClaim = useMissionClaim({ onClaimed: missionsState.refetch });
+
+  // Derive the "Today's progress" count from server state. The optimistic
+  // path in useMissions already bumps currentCount synchronously on a
+  // successful fireEvent (TASK-006), so this stays responsive without a
+  // local mirror. Clamp via Math.min to match MissionCard's display
+  // contract — never overshoot the target even if the server briefly
+  // counts past it (defense in depth, mirrors MissionCard line 90-91).
+  const bingeProgress = missionsState.data?.progress[STREAM_BINGE_MISSION_ID];
+  const rawCount = bingeProgress?.currentCount ?? 0;
+  const targetCount = bingeProgress?.targetCount ?? STREAM_BINGE_TARGET;
+  const watchedToday = Math.min(rawCount, targetCount);
+
+  // Celebration trigger: fire the toast + confetti when the SERVER count
+  // crosses into target territory during this session. We use a ref pair
+  // to remember (a) whether we've captured the initial count yet and (b)
+  // the last count we saw — so the effect only fires on a strictly
+  // increasing transition INTO the target, not on the first render after
+  // a reload when the user already has count >= target from a prior visit.
+  const prevCountRef = useRef<number>(0);
+  const hasSeenInitialRef = useRef<boolean>(false);
+  useEffect(() => {
+    // Wait for the initial useMissions fetch to resolve before we trust
+    // the count. Otherwise we'd capture 0 on every render and falsely
+    // fire when the real data lands above the target.
+    if (!missionsState.isSuccess) return undefined;
+    if (!hasSeenInitialRef.current) {
+      // First post-fetch render: snapshot the count and skip the trigger.
+      // If the user already hit the target before this visit, we don't
+      // re-celebrate.
+      hasSeenInitialRef.current = true;
+      prevCountRef.current = watchedToday;
+      return undefined;
+    }
+    const prev = prevCountRef.current;
+    if (prev < STREAM_BINGE_TARGET && watchedToday >= STREAM_BINGE_TARGET) {
+      showToast({ kind: "badge", badgeId: "binge_starter" });
+      setBingeUnlocked(true);
+      const timeout = window.setTimeout(() => setBingeUnlocked(false), 1200);
+      prevCountRef.current = watchedToday;
+      return () => {
+        window.clearTimeout(timeout);
+      };
+    }
+    prevCountRef.current = watchedToday;
+    return undefined;
+  }, [watchedToday, showToast, missionsState.isSuccess]);
 
   async function handleWatch(video: Video): Promise<void> {
     setBusy(video.id);
@@ -101,16 +160,10 @@ export function StreamingRoute(): ReactElement {
           duration_sec: video.durationSec,
         },
       });
-      const nextCount = watchedToday + 1;
-      setWatchedToday(nextCount);
-      if (nextCount === 3) {
-        // Surface the unlock with a toast; the server-side rule engine
-        // will fire the real reward but this gives the demo immediacy.
-        showToast({ kind: "badge", badgeId: "binge_starter" });
-        setBingeUnlocked(true);
-        // Allow re-triggering for replay (resets after the burst).
-        setTimeout(() => setBingeUnlocked(false), 1200);
-      }
+      // No local counter to bump — useMissions handles optimistic +1
+      // for any mission whose criteria matched server-side. The
+      // celebration trigger lives in the useEffect above, driven by
+      // the server-derived count crossing STREAM_BINGE_TARGET.
     } catch {
       // EventLog panel surfaces fire failures.
     } finally {
@@ -147,12 +200,12 @@ export function StreamingRoute(): ReactElement {
               className="grid h-10 w-10 place-items-center rounded-full text-xl"
               style={{
                 background:
-                  watchedToday >= 3
+                  watchedToday >= targetCount
                     ? "var(--color-qk-coin)"
                     : "var(--color-demo-surface)",
               }}
             >
-              {watchedToday >= 3 ? "🏆" : "📺"}
+              {watchedToday >= targetCount ? "🏆" : "📺"}
             </motion.div>
             <AnimatePresence>
               {bingeUnlocked && !reduced
@@ -184,15 +237,15 @@ export function StreamingRoute(): ReactElement {
           <div>
             <p className="text-sm font-semibold">Watched today</p>
             <p className="text-xs" style={{ color: "var(--color-demo-muted)" }}>
-              Unlock the Binge Starter badge at 3.
+              Unlock the Binge Starter badge at {targetCount}.
             </p>
           </div>
         </div>
         <div
           className="flex items-center gap-1.5"
-          aria-label={`${watchedToday} of 3 watched`}
+          aria-label={`${watchedToday} of ${targetCount} watched`}
         >
-          {Array.from({ length: 3 }).map((_, i) => (
+          {Array.from({ length: targetCount }).map((_, i) => (
             <span
               key={i}
               aria-hidden="true"
@@ -209,7 +262,7 @@ export function StreamingRoute(): ReactElement {
             className="ml-2 text-sm font-semibold tabular-nums"
             aria-live="polite"
           >
-            {watchedToday}/3
+            {watchedToday}/{targetCount}
           </span>
         </div>
       </section>

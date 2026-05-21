@@ -19,6 +19,29 @@ const baseURL =
     ? "https://questkit.jairukchan.com"
     : "http://localhost:5173";
 
+// TASK-005 / Phase 9 — Cloudflare Bot Management challenges GitHub Actions
+// runner IPs on POST /api/token (Better Auth's unauthenticated token-mint
+// endpoint). Manual users on residential IPs sail through; CI runners get
+// a JS challenge Playwright cannot solve at the HTTP layer. The mitigation
+// is a CF WAF custom rule (see docs/SELF_HOSTING.md §8.6) that skips Super
+// Bot Fight Mode + Managed Rules ONLY when the request carries this header
+// with the matching 32-byte hex secret. Stored in the GitHub Actions secret
+// `CI_BOT_BYPASS_TOKEN` and in the CF dashboard rule expression.
+//
+// Gate is `target === "prod" && bypassToken`:
+//   - Never sent in local mode (no need, no CF in front of vite dev)
+//   - Header omitted if the secret isn't wired yet — production rule will
+//     then reject those requests via normal bot scoring, which is correct
+//     fail-closed behaviour.
+//   - Safe to leak: the upstream APP_SECRET (held only by the demo worker)
+//     is still required to mint a real token; this header just bypasses
+//     bot scoring on /api/token.
+const bypassToken = process.env.CI_BOT_BYPASS_TOKEN;
+const ciBypassHeaders =
+  target === "prod" && bypassToken
+    ? { "x-questkit-ci-bypass": bypassToken }
+    : undefined;
+
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: false, // serialize so the demo_user_42 state doesn't race
@@ -42,6 +65,10 @@ export default defineConfig({
     navigationTimeout: 15_000,
     trace: "retain-on-failure",
     video: "retain-on-failure",
+    // Attached to every request (HTML nav, fetch, XHR, API context). Only
+    // populated in prod mode when CI_BOT_BYPASS_TOKEN is set — see the
+    // `ciBypassHeaders` block above for the full rationale.
+    extraHTTPHeaders: ciBypassHeaders,
   },
 
   projects: [

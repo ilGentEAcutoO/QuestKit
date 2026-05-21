@@ -166,6 +166,65 @@ function tryParseJson(raw: string): unknown | null {
 }
 
 /**
+ * Result envelope from `normalizeAiEnvelope`.
+ *
+ * On success (`payload !== null`), the caller uses the parsed AiPayload and
+ * `reason`/`strategy` carry diagnostic info ONLY for logs.
+ *
+ * On failure (`payload === null`), the caller surfaces a fallback and emits a
+ * single-line warn that includes the populated `reason` + `fingerprint` so an
+ * operator can tell from `wrangler tail` whether the AI is regressing (e.g.
+ * runtime returned a new envelope shape) vs. hallucinating non-JSON.
+ *
+ * `fingerprint` is a short structural summary of the raw AI response — the
+ * top-level keys + their value types — NEVER the values themselves (the
+ * values may include LLM-leaked PII or attempted prompt-injection). Bounded
+ * to ~200 chars to keep tail output tidy.
+ */
+interface EnvelopeOutcome {
+  payload: AiPayload | null;
+  /** Which envelope strategy won (success) OR the last reason for failure. */
+  strategy:
+    | "response-string"
+    | "result-string"
+    | "result-object"
+    | "raw-object"
+    | "no-strategy-matched"
+    | "not-an-object";
+  /** Populated on failure — short structural fingerprint for the tail log. */
+  fingerprint?: string;
+}
+
+/**
+ * Build a bounded, value-stripped fingerprint of an unknown AI response so it
+ * can land in a log line without leaking model output or PII. We surface only
+ * key names + value types/lengths — enough to tell apart "runtime regressed
+ * to a new envelope shape" from "AI returned non-JSON prose" without exposing
+ * what the user typed or what the LLM said.
+ */
+function envelopeFingerprint(raw: unknown): string {
+  if (raw === null) return "null";
+  const t = typeof raw;
+  if (t !== "object") return t;
+  if (Array.isArray(raw)) return `array(len=${raw.length})`;
+  const obj = raw as Record<string, unknown>;
+  const parts: string[] = [];
+  for (const k of Object.keys(obj).slice(0, 8)) {
+    const v = obj[k];
+    if (typeof v === "string") {
+      parts.push(`${k}:string(len=${v.length})`);
+    } else if (typeof v === "object" && v !== null) {
+      parts.push(`${k}:${Array.isArray(v) ? "array" : "object"}`);
+    } else {
+      parts.push(`${k}:${typeof v}`);
+    }
+  }
+  let s = `{${parts.join(",")}}`;
+  if (s.length > 200) s = `${s.slice(0, 197)}...`;
+  return s;
+}
+
+/**
  * Normalize the Workers-AI return envelope into a validated `AiPayload`.
  *
  * Tries each of these strategies in order, returning the first one that
@@ -176,9 +235,10 @@ function tryParseJson(raw: string): unknown | null {
  *   3. `aiResponse` itself is an object that already looks like the payload
  *      (has a `missionIds` field) → validate it.
  *
- * Returns null if none of the strategies produce a valid payload. The caller
- * (in `recommendMissions`) translates null into a fallback result rather than
- * throwing.
+ * Returns `{ payload: null, strategy, fingerprint }` if none of the strategies
+ * produce a valid payload — the caller emits a single-line warn so the
+ * specific failure mode is visible in `wrangler tail` and translates the
+ * null into a fallback result rather than throwing.
  *
  * This tolerance is necessary because `@cf/meta/llama-3.1-8b-instruct-fast`
  * (the locked model id per amendment A8) returns different envelope shapes
@@ -186,15 +246,21 @@ function tryParseJson(raw: string): unknown | null {
  * handled shape 1 and broke in production when the runtime started returning
  * shape 2.
  */
-function normalizeAiEnvelope(aiResponse: unknown): AiPayload | null {
-  if (typeof aiResponse !== "object" || aiResponse === null) return null;
+function normalizeAiEnvelope(aiResponse: unknown): EnvelopeOutcome {
+  if (typeof aiResponse !== "object" || aiResponse === null) {
+    return {
+      payload: null,
+      strategy: "not-an-object",
+      fingerprint: envelopeFingerprint(aiResponse),
+    };
+  }
   const obj = aiResponse as Record<string, unknown>;
 
   // Strategy 1: { response: "<json-string>" }
   if (typeof obj.response === "string") {
     const parsed = tryParseJson(obj.response);
     const payload = validateAiPayload(parsed);
-    if (payload !== null) return payload;
+    if (payload !== null) return { payload, strategy: "response-string" };
     // Fall through to next strategy if the .response string didn't validate.
   }
 
@@ -203,17 +269,21 @@ function normalizeAiEnvelope(aiResponse: unknown): AiPayload | null {
   if (typeof result === "string") {
     const parsed = tryParseJson(result);
     const payload = validateAiPayload(parsed);
-    if (payload !== null) return payload;
+    if (payload !== null) return { payload, strategy: "result-string" };
   } else if (typeof result === "object" && result !== null) {
     const payload = validateAiPayload(result);
-    if (payload !== null) return payload;
+    if (payload !== null) return { payload, strategy: "result-object" };
   }
 
   // Strategy 3: raw object — payload is at the top level.
   const direct = validateAiPayload(obj);
-  if (direct !== null) return direct;
+  if (direct !== null) return { payload: direct, strategy: "raw-object" };
 
-  return null;
+  return {
+    payload: null,
+    strategy: "no-strategy-matched",
+    fingerprint: envelopeFingerprint(obj),
+  };
 }
 
 /**
@@ -289,26 +359,46 @@ export async function recommendMissions(
     return { ...cached, cached: true };
   }
 
-  // Step 2 — build the prompt + call AI.
+  // Step 2 — build the prompt + call AI. The `env.AI.run` call may itself
+  // throw (binding outage, model not available, timeout). We catch and log a
+  // distinct reason so `wrangler tail` shows the failure mode at a glance —
+  // the route's outer try/catch will translate the rethrow into a fallback.
   const userMessage = buildUserMessage(recentEvents, activeMissions);
-  const aiResponse = await env.AI.run(AI_MODEL_ID, {
-    messages: [
-      { role: "system", content: SYSTEM_PROMPT },
-      { role: "user", content: userMessage },
-    ],
-    max_tokens: 200,
-    response_format: { type: "json_object" },
-  });
+  let aiResponse: unknown;
+  try {
+    aiResponse = await env.AI.run(AI_MODEL_ID, {
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: userMessage },
+      ],
+      max_tokens: 200,
+      response_format: { type: "json_object" },
+    });
+  } catch (err) {
+    const errName = err instanceof Error ? err.name : typeof err;
+    const errMsg = err instanceof Error ? err.message : String(err);
+    console.warn(
+      `[ai] fallback reason=ai-run-threw model=${AI_MODEL_ID} errName=${errName} errMsg=${errMsg.slice(0, 200)}`,
+    );
+    // Re-throw so the route's outer try/catch surfaces a fallback 200 — we
+    // keep the throw to preserve the previous binding-outage code path
+    // (recommendations.ts handles it), but the log above means the operator
+    // can now tell the AI throw apart from a malformed-response fallback.
+    throw err;
+  }
 
   // Step 3 — normalize the envelope (3 accepted shapes) into a validated
-  // payload. Returns null on any failure → graceful fallback.
-  const payload = normalizeAiEnvelope(aiResponse);
-  if (payload === null) {
+  // payload. On failure the outcome carries a distinct reason + fingerprint
+  // so a single tail line tells us which envelope strategy failed and what
+  // top-level keys/types the runtime returned (values stripped to avoid PII).
+  const outcome = normalizeAiEnvelope(aiResponse);
+  if (outcome.payload === null) {
     console.warn(
-      "[ai] response did not match any known envelope; falling back",
+      `[ai] fallback reason=envelope-${outcome.strategy} model=${AI_MODEL_ID} fingerprint=${outcome.fingerprint ?? "n/a"}`,
     );
     return fallbackResult();
   }
+  const payload = outcome.payload;
 
   // Step 4 — filter hallucinated IDs. The LLM may invent ids; we drop any
   // that don't correspond to an active mission.

@@ -336,6 +336,129 @@ questkit-worker-api`.
   account (e.g. somebody deleted the KV namespace). Recreate via
   `./scripts/setup.sh` and update `wrangler.jsonc` accordingly.
 
+### 8.6 CI E2E bypass (Cloudflare Bot Management)
+
+The Playwright E2E suite at the end of `deploy.yml` ("Run E2E suite against
+live deploy") drives a real headless Chromium against the live apex demo.
+The first request the demo makes after page load is `POST /api/token` —
+Better Auth's unauthenticated token-mint endpoint that exchanges the
+demo's `APP_SECRET` (held by the demo worker) for a short-lived session
+JWT.
+
+Cloudflare Bot Management, however, scores GitHub Actions runner IPs as
+likely bots (they are: shared, datacentre, fast-cycled). Manual users on
+residential IPs hit `/api/token` fine; CI runners get a JS challenge
+Playwright cannot solve at the HTTP layer. Without a bypass, every CI
+E2E run fails at session acquisition before the first assertion.
+
+**Fix:** a narrowly-scoped WAF custom rule that skips Super Bot Fight Mode
+
+- Managed Rules only for requests carrying a shared 32-byte hex header.
+  The secret lives in two places:
+
+1. The CF WAF rule expression (dashboard).
+2. The GitHub Actions secret `CI_BOT_BYPASS_TOKEN`.
+
+Playwright in prod mode reads the env var and attaches the header
+`x-questkit-ci-bypass: <token>` to every request (see
+`apps/demo/playwright.config.ts`).
+
+#### Step 1 — Generate the secret
+
+```bash
+openssl rand -hex 32
+```
+
+Copy the 64-character hex string. Don't paste it into a chat, ticket, or
+commit — only into the two destinations below.
+
+#### Step 2 — Store as GitHub Actions secret
+
+`Settings → Secrets and variables → Actions → New repository secret`:
+
+| Name                  | Value                              |
+| --------------------- | ---------------------------------- |
+| `CI_BOT_BYPASS_TOKEN` | the 64-char hex string from step 1 |
+
+The deploy workflow already references it as
+`${{ secrets.CI_BOT_BYPASS_TOKEN }}` in the "Run E2E suite against live
+deploy" step. No code change needed.
+
+#### Step 3 — Create the Cloudflare WAF custom rule
+
+Dashboard → your account → zone `jairukchan.com` (or your own apex zone)
+→ **Security** → **WAF** → **Custom rules** → **Create rule**.
+
+| Field                                                               | Value                                                              |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| Rule name                                                           | `questkit-ci-e2e-bypass`                                           |
+| Field/operator (Edit expression in Expression Editor for exactness) | (see below)                                                        |
+| Action                                                              | **Skip**                                                           |
+| Skip > WAF components                                               | **Super Bot Fight Mode**, **All managed rules**                    |
+| Place                                                               | **First** (rules execute top-to-bottom; this must run before SBFM) |
+
+Paste this exact expression into the Expression Editor (replace
+`PASTE_YOUR_64_CHAR_HEX_HERE` with your secret from step 1):
+
+```text
+(http.host eq "questkit.jairukchan.com" and http.request.method eq "POST" and http.request.uri.path eq "/api/token" and http.request.headers["x-questkit-ci-bypass"][0] eq "PASTE_YOUR_64_CHAR_HEX_HERE")
+```
+
+Save and **Deploy**. Propagation is < 30 seconds globally.
+
+Verify the rule is scoped correctly (so a leaked secret cannot disable
+bot scoring everywhere):
+
+```bash
+# Same path, same method, missing header → still challenged (expected)
+curl -i -X POST https://questkit.jairukchan.com/api/token
+
+# Same path, same method, header present → 200 (or 4xx from Better Auth,
+# but NOT a CF challenge page)
+curl -i -X POST -H "x-questkit-ci-bypass: <your-token>" \
+  https://questkit.jairukchan.com/api/token
+
+# Different path, header present → still challenged on next /api endpoint
+# (rule doesn't match anything but POST /api/token)
+curl -i -H "x-questkit-ci-bypass: <your-token>" \
+  https://questkit.jairukchan.com/api/missions
+```
+
+#### Step 4 — Rotation
+
+The secret is rotation-safe with < 5 minutes of CI E2E downtime:
+
+1. Generate new secret: `openssl rand -hex 32`.
+2. Update the GitHub Actions secret value (same name).
+3. Update the CF WAF rule expression with the new value, click Deploy.
+4. The next deploy's E2E step will use the new secret.
+
+Order doesn't matter much — between step 2 and step 3 the CI step may
+fail one run, but no production user is affected (the rule only matters
+for CI runners with the header; everyone else goes through normal bot
+scoring either way).
+
+#### Security trade-off
+
+A leaked `CI_BOT_BYPASS_TOKEN` lets an attacker bypass CF Bot Management
+scoring **only on POST /api/token, and only with a matching header**.
+They still cannot mint a real session token — the demo worker's
+`/api/token` proxy validates the upstream `APP_SECRET` (held only on
+the worker, never sent to the browser or CI) before forwarding to the
+api worker's `/v1/auth/token` endpoint. So the leak impact is bounded
+to "attacker can spam unauthenticated token-mint attempts without bot
+scoring", which:
+
+- doesn't bypass rate limiting (Durable Object rate limiter still
+  applies),
+- doesn't bypass authentication (APP_SECRET still required),
+- doesn't expose user data (the endpoint mints anonymous demo sessions).
+
+Compared to the alternatives (allowlist GitHub IPs — too broad; CF
+Access on /api/token — breaks real users; service-token header on the
+demo worker — same risk surface with worse rotation), the bot-scoring
+skip is the minimum viable bypass.
+
 ## 9. Next steps
 
 - Read the [README](../README.md) for the elevator pitch and embedded demo

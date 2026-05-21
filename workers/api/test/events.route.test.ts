@@ -475,8 +475,7 @@ describe("post /v1/events — rate limiter enforcement (TASK-011)", () => {
     expect(Number.isFinite(retryAfterSec)).toBe(true);
     expect(retryAfterSec).toBeGreaterThan(0);
     expect(retryAfterSec).toBeLessThanOrEqual(60);
-  }, // Generous test timeout: 100+ serial fetches through the worker can
-  // take a while under workerd. Default 5s isn't always enough.
+  }, // take a while under workerd. Default 5s isn't always enough. // Generous test timeout: 100+ serial fetches through the worker can
   20_000);
 
   it("treats a non-200/429 status from the limiter as 'allow' (defensive)", async () => {
@@ -490,6 +489,168 @@ describe("post /v1/events — rate limiter enforcement (TASK-011)", () => {
     const res = await postEvent(validBody(userId), { token });
     expect(res.status).toBe(200);
   });
+});
+
+describe("post /v1/events — TASK-003 minigame no-currency-mint contract (B5)", () => {
+  // Background — the demo's /minigames page fires qk.minigame.spin /
+  // qk.minigame.scratch on each spin / reveal. Migration 0004 wires
+  // both event names to badge-only missions (mis_lucky_spinner /
+  // mis_scratch_master), so the rule engine advances badge progress
+  // but the events pipeline NEVER writes to the balances table. Coin
+  // minting is gated behind the explicit POST /v1/missions/:id/claim
+  // path (db/schema.ts::claimMission) — and even there, only when the
+  // mission's reward_json.kind === "currency".
+  //
+  // This contract is what makes TASK-003's demo-side toast fix safe:
+  // even if a future demo regression starts displaying "+10 coin"
+  // again, the server-side behaviour is locked here. If a future
+  // refactor accidentally couples events ingest to balance writes
+  // (e.g. via a misplaced reward hook in the rule engine), THIS test
+  // is the canary.
+
+  it("qk.minigame.spin does NOT create or mutate any balances row", async () => {
+    const userId = `u_minigame_spin_${crypto.randomUUID()}`;
+    const { token } = await mintToken(userId);
+
+    // Sanity: zero balance rows for this fresh user before the spin.
+    const preCount = await env.DB.prepare(
+      "SELECT COUNT(*) as c FROM balances WHERE user_id = ?1",
+    )
+      .bind(userId)
+      .first<{ c: number }>();
+    expect(preCount?.c).toBe(0);
+
+    const res = await postEvent(
+      {
+        userId,
+        name: "qk.minigame.spin",
+        payload: {
+          game: "spin_wheel",
+          reward: { kind: "badge", badgeId: "lucky_spinner" },
+        },
+        timestamp: Date.now(),
+      },
+      { token },
+    );
+    expect(res.status).toBe(200);
+
+    // The event was ingested.
+    const eventRow = await env.DB.prepare(
+      "SELECT name FROM events WHERE user_id = ?1 AND name = ?2",
+    )
+      .bind(userId, "qk.minigame.spin")
+      .first<{ name: string }>();
+    expect(eventRow?.name).toBe("qk.minigame.spin");
+
+    // CRITICAL contract: balances table is still empty. No coin / gem /
+    // anything else was minted by the events pipeline. Currency mints
+    // happen only through POST /v1/missions/:id/claim with a
+    // currency-kind reward — never on raw event ingest.
+    const postCount = await env.DB.prepare(
+      "SELECT COUNT(*) as c FROM balances WHERE user_id = ?1",
+    )
+      .bind(userId)
+      .first<{ c: number }>();
+    expect(postCount?.c).toBe(0);
+
+    // Sharper assertion: the coin currency row in particular must not
+    // exist (this is the exact lie the old demo toast told).
+    const coinRow = await env.DB.prepare(
+      "SELECT amount FROM balances WHERE user_id = ?1 AND currency = ?2",
+    )
+      .bind(userId, "coin")
+      .first<{ amount: number }>();
+    expect(coinRow).toBeNull();
+  });
+
+  it("qk.minigame.scratch does NOT create or mutate any balances row", async () => {
+    const userId = `u_minigame_scratch_${crypto.randomUUID()}`;
+    const { token } = await mintToken(userId);
+
+    const preCount = await env.DB.prepare(
+      "SELECT COUNT(*) as c FROM balances WHERE user_id = ?1",
+    )
+      .bind(userId)
+      .first<{ c: number }>();
+    expect(preCount?.c).toBe(0);
+
+    const res = await postEvent(
+      {
+        userId,
+        name: "qk.minigame.scratch",
+        payload: { game: "scratch_card" },
+        timestamp: Date.now(),
+      },
+      { token },
+    );
+    expect(res.status).toBe(200);
+
+    const eventRow = await env.DB.prepare(
+      "SELECT name FROM events WHERE user_id = ?1 AND name = ?2",
+    )
+      .bind(userId, "qk.minigame.scratch")
+      .first<{ name: string }>();
+    expect(eventRow?.name).toBe("qk.minigame.scratch");
+
+    // Balances table is still empty after the scratch event.
+    const postCount = await env.DB.prepare(
+      "SELECT COUNT(*) as c FROM balances WHERE user_id = ?1",
+    )
+      .bind(userId)
+      .first<{ c: number }>();
+    expect(postCount?.c).toBe(0);
+
+    const coinRow = await env.DB.prepare(
+      "SELECT amount FROM balances WHERE user_id = ?1 AND currency = ?2",
+    )
+      .bind(userId, "coin")
+      .first<{ amount: number }>();
+    expect(coinRow).toBeNull();
+  });
+
+  it("advancing mis_lucky_spinner progress via 5 qk.minigame.spin events still does NOT mint currency", async () => {
+    // End-to-end pin: even when the spin events COMPLETE a badge mission,
+    // no currency is minted. The mission is reward_json.kind=badge — the
+    // claim endpoint (separately tested in missions.route.test.ts) would
+    // only mint if kind=currency.
+    const userId = `u_minigame_full_progress_${crypto.randomUUID()}`;
+    const { token } = await mintToken(userId);
+
+    for (let i = 0; i < 5; i++) {
+      const res = await postEvent(
+        {
+          userId,
+          name: "qk.minigame.spin",
+          payload: { game: "spin_wheel" },
+          timestamp: Date.now() + i,
+        },
+        { token, idempotencyHeader: `spin_${i}_${crypto.randomUUID()}` },
+      );
+      expect(res.status).toBe(200);
+    }
+
+    // The 5th spin should have completed mis_lucky_spinner (count=5).
+    const progress = await env.DB.prepare(
+      "SELECT status, current_count FROM mission_progress WHERE user_id = ?1 AND mission_id = ?2",
+    )
+      .bind(userId, "mis_lucky_spinner")
+      .first<{ status: string; current_count: number }>();
+    expect(progress?.current_count).toBe(5);
+    // Status may be "completed" (5/5 of a count=5 mission) — the precise
+    // string is the rule engine's contract; what matters here is the
+    // balance side-effect, asserted below.
+
+    // CRITICAL: balances row is still empty even after completing the
+    // badge mission. The completion does not auto-mint; the claim must
+    // be invoked separately (and even then it only mints currency-kind
+    // rewards — lucky_spinner is a badge).
+    const balanceCount = await env.DB.prepare(
+      "SELECT COUNT(*) as c FROM balances WHERE user_id = ?1",
+    )
+      .bind(userId)
+      .first<{ c: number }>();
+    expect(balanceCount?.c).toBe(0);
+  }, 15_000);
 });
 
 afterEach(() => {
