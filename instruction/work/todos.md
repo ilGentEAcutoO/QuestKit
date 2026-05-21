@@ -1,11 +1,74 @@
 # QuestKit — Active Tasks
 
-> Last updated: 2026-05-21 12:30 (Phase 9 — TASK-002 done; widgets now derive from useMissions, localStorage streak machinery deleted, claim-flow E2E spec added)
+> Last updated: 2026-05-21 13:30 (Phase 9 — ALL TASKS COMPLETE + 3 hotfixes shipped; v0.1.8 live in prod, B6 verified working)
+
+## RESUME CONTEXT
+
+> Exit time: 2026-05-21 13:30
+> Reason: User invoked /workflow-exit — session checkpoint
+> Working tree: clean. All changes committed and pushed.
+
+### Session outcome — Phase 9 v0.1.5 → v0.1.8 shipped
+
+All 8 planned Phase 9 tasks complete. Three follow-up hotfixes
+(v0.1.6 → v0.1.8) walked the B6 root-cause bisect to a verified fix.
+
+| Version | Commit    | Status                                                                 |
+| ------- | --------- | ---------------------------------------------------------------------- |
+| v0.1.5  | `7321670` | Phase 9 bug-fix sweep (B1/B3/B4/B5 + D1–D6 + CI gate code side)        |
+| v0.1.6  | `1021905` | BadgeWall panel + Canvas2D opt-in + AI model swap (B6 step 1)          |
+| v0.1.7  | `a8120d2` | response_format → json_schema (B6 step 2)                              |
+| v0.1.8  | `bbe0a0f` | 4th envelope strategy `response-object` (B6 step 3 — VERIFIED WORKING) |
+
+### Production state — 2026-05-21 13:30
+
+- `https://api.questkit.jairukchan.com/v1/health` → `{"ok":true,"version":"0.1.8"}`
+- `GET /v1/recommendations` → real LLM picks, no `fallback:true` field
+- All v0.1.5 bug fixes shipped: claim flow, widget reconciliation, honest minigame
+  toasts, footer version, Curious Mind audit, observability
+- BadgeWall panel deployed (top-left FAB, code-split ~4kB)
+- ScratchCard Canvas2D warning silenced
+
+### Remaining manual items for user (no code work pending)
+
+1. **Manual browser walkthrough at `https://questkit.jairukchan.com`** — re-test
+   B1/B3/B4/B5 + verify BadgeWall + verify AI picks panel populates. Phase 9
+   acceptance.
+2. **Optional: unblock CI E2E gate** — `openssl rand -hex 32` → GH secret
+   `CI_BOT_BYPASS_TOKEN` + CF dashboard WAF rule per `docs/SELF_HOSTING.md` §8.6.
+   Workers + bug fixes are already live; only the E2E badge stays red until
+   these manual steps land.
+3. **Phase 10 backlog** — already noted in CHANGELOG / test-report:
+   - Server-side minigame coin mint (B5 option b — deferred per scope)
+   - Potential BadgeWall persistence via a `user_badges` table if a future
+     phase wants badges granted outside the mission flow
+   - Replace `local-only` `binge_starter` celebration toast with a real
+     server-side mission so it shows up in BadgeWall
+
+### Agent States (all closed)
+
+All 7 sub-agents from Wave 1 + Wave 2 completed and reported in. No background
+processes or unfinished work. Working tree is clean — no stash, no WIP commit
+needed.
+
+### Resume entry point
+
+If next session asks "มีงานค้างไหม":
+
+- `instruction/work/` still has `plan.md`, `requirements.md`, `test-report.md`,
+  `todos.md` for Phase 9. Either:
+  - **Archive Phase 9** via `/workflow-end` — moves the work/ files to
+    `instruction/archive/003-phase-9-v0.1.8-bug-fix-sweep/` and resets work/.
+  - **Continue with manual walkthrough** + the optional CI gate steps before
+    archiving.
+
+---
+
 > Plan: [`./plan.md`](./plan.md)
 > Requirements: [`./requirements.md`](./requirements.md)
 > Previous phase archived at [`../archive/002-phase-8-v0.1.4-demo-stability/`](../archive/002-phase-8-v0.1.4-demo-stability/)
 >
-> **Execution plan:**
+> **Original execution plan (for history):**
 >
 > - Wave 1 (parallel): TASK-001, TASK-003, TASK-004, TASK-005, TASK-006, TASK-007
 > - Wave 2 (after TASK-001 done): TASK-002 (depends on `mission.claimed` SSE wire)
