@@ -138,7 +138,11 @@ export function ScratchCard({
     reducedMotionRef.current = readReducedMotion();
     const canvas = canvasRef.current;
     if (canvas === null) return;
-    const ctx = canvas.getContext("2d");
+    // willReadFrequently: true — the sample() loop calls getImageData on
+    // every requestAnimationFrame tick during a scratch drag; without this
+    // hint Chrome warns "Multiple readback operations using getImageData are
+    // faster with the willReadFrequently attribute set to true."
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
     if (ctx === null) return;
     ctxRef.current = ctx;
     paintOverlay(ctx);

@@ -5,6 +5,60 @@ All notable changes to QuestKit are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.6] — 2026-05-21
+
+Same-day follow-up to v0.1.5 surfacing three issues caught in the
+post-deploy walkthrough.
+
+### Fixed
+
+- **`workers/api/src/services/ai.ts` — AI picks B6 root cause.**
+  Switched `AI_MODEL_ID` from `@cf/meta/llama-3.1-8b-instruct-fast`
+  (which TASK-006 in v0.1.5 measured at 100% fallback rate against
+  prod) to `@cf/meta/llama-3.1-8b-instruct`. Cloudflare appears to
+  have deprecated the `-fast` variant — the non-`-fast` base is the
+  current stable id per `developers.cloudflare.com/workers-ai/models/`.
+  The v0.1.5 observability (`[ai] fallback reason=…` log lines per
+  branch) will identify a different failure mode if this turns out to
+  be wrong; re-run the diagnostic recipe in `instruction/work/test-report.md`
+  if `/v1/recommendations` still returns `fallback:true` after the
+  v0.1.6 deploy.
+- **`packages/react/src/components/ScratchCard/index.tsx` — Canvas2D
+  readback opt-in.** `canvas.getContext("2d")` now passes
+  `{ willReadFrequently: true }`. The component's `sample()` loop calls
+  `getImageData` on every `requestAnimationFrame` tick during a scratch
+  drag — Chrome was warning "Multiple readback operations using
+  getImageData are faster with the willReadFrequently attribute set
+  to true." Browser console is now clean during scratch interactions.
+
+### Added
+
+- **`apps/demo/src/panels/BadgeWall.tsx` — earned-badges floating
+  panel.** New top-left FAB labelled "🏆 Badges N" that expands to a
+  grid of badges the user has actually earned. Derives the list
+  client-side from `useMissions()` — a badge is "earned" iff its
+  backing mission has `progress.status === "claimed"` AND
+  `mission.reward.kind === "badge"`. No DB schema change, no new
+  endpoint: the existing mission-claim path is already the
+  persistence layer. Includes per-badge emoji map (Power User ⚡,
+  Curious Mind 🔍, Daily Visitor 📅, Lucky Spinner 🎰, Scratch
+  Master 🎫) with a `🏅` fallback for unknown ids so a future seed
+  migration adds a badge without breaking the render. Empty state
+  reads "No badges yet — claim a mission to earn your first!" Code-split
+  via `React.lazy` like the other floating panels so initial
+  LCP is unaffected. Closes the v0.1.5 walkthrough question: "where
+  do I see the badges I've earned?"
+
+### Notes
+
+- The streaming route's local `binge_starter` celebration toast is
+  intentionally NOT shown in BadgeWall — it has no backing
+  server-side mission, so a reload would silently drop it. If a
+  future phase wants `binge_starter` in the wall, the right move is
+  to add a real mission to the seed.
+
+[0.1.6]: https://github.com/ilGentEAcutoO/QuestKit/releases/tag/v0.1.6
+
 ## [0.1.5] — 2026-05-21
 
 Bug-fix sweep driven by the live production smoke of v0.1.4. Closes

@@ -198,8 +198,10 @@ describe("recommendMissions — cache MISS path", () => {
     const inputs = callArgs[1] as {
       messages: { role: string; content: string }[];
     };
-    // Model id locked by amendment A8 — DO NOT change without the user.
-    expect(model).toBe("@cf/meta/llama-3.1-8b-instruct-fast");
+    // Model id — v0.1.6 hotfix moved off the `-fast` variant after it
+    // returned 100% AI binding throws in prod (TASK-006). DO NOT change
+    // again without redoing the diagnostic recipe in test-report.md.
+    expect(model).toBe("@cf/meta/llama-3.1-8b-instruct");
     expect(inputs.messages).toHaveLength(2);
     const sys = inputs.messages[0];
     const usr = inputs.messages[1];

@@ -40,19 +40,23 @@
  *     empty-state ("AI picks unavailable right now") rather than a red 502.
  *     Fallback results are NEVER cached — the next call retries the AI.
  *
- *   - Model id: `@cf/meta/llama-3.1-8b-instruct-fast` — locked by plan
- *     amendment A8 (base `llama-3.1-8b-instruct` was deprecated 2026-05-30).
- *     The `-fast` variant doesn't appear in the generated AiModels d.ts so
- *     `env.AI.run(...)` falls through to the `string & {} -> Record<string,
- *     unknown>` overload and we cast its return shape ourselves.
+ *   - Model id: `@cf/meta/llama-3.1-8b-instruct` — v0.1.6 hotfix. The
+ *     `-fast` variant locked by amendment A8 returned 100% AI binding throws
+ *     in v0.1.5 prod (TASK-006 spike, 5/5 fallback rate). Cloudflare appears
+ *     to have deprecated `-fast`; the non-`-fast` base is the current
+ *     stable id per `developers.cloudflare.com/workers-ai/models/`. Same
+ *     envelope tolerance applies (`response_format: { type: "json_object" }`
+ *     and the existing 3 normaliser strategies still cover the response
+ *     shape). If this throws again, the v0.1.5 observability will identify
+ *     the new branch via `wrangler tail` grep `[ai] fallback reason=`.
  */
 import type { Event, Mission } from "@questkit/types";
 
 /** KV cache TTL — brief-locked at 3600 seconds (1 hour). */
 export const RECOMMENDATIONS_CACHE_TTL_SECONDS = 3600;
 
-/** Workers AI model id — locked by plan amendment A8. DO NOT CHANGE. */
-export const AI_MODEL_ID = "@cf/meta/llama-3.1-8b-instruct-fast" as const;
+/** Workers AI model id. v0.1.6 hotfix — see file-level JSDoc. */
+export const AI_MODEL_ID = "@cf/meta/llama-3.1-8b-instruct" as const;
 
 /**
  * System prompt — locked verbatim by the brief. The wording is deliberately

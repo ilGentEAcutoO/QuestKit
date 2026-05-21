@@ -20,6 +20,9 @@ const AIRecommendations = lazy(() =>
     default: m.AIRecommendations,
   })),
 );
+const BadgeWall = lazy(() =>
+  import("../panels/BadgeWall").then((m) => ({ default: m.BadgeWall })),
+);
 const DevTools = lazy(() =>
   import("../panels/DevTools").then((m) => ({ default: m.DevTools })),
 );
@@ -248,6 +251,7 @@ function DeferredPanels(): ReactElement | null {
     <Suspense fallback={null}>
       <DevTools />
       <AIRecommendations />
+      <BadgeWall />
       <EventLog />
     </Suspense>
   );

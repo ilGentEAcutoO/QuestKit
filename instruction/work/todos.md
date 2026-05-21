@@ -208,7 +208,7 @@
 
 ### Task: [TASK-008] v0.1.5 release — version bump + smoke + walkthrough
 
-- **Status:** 🟡 code-ready (awaiting push + post-deploy walkthrough)
+- **Status:** 🟢 DEPLOYED to prod — v0.1.5 live on `https://api.questkit.jairukchan.com` (`/v1/health` confirms `version:"0.1.5"`). Awaits user manual walkthrough + optional E2E gate unblock.
 - **Priority:** P0
 - **Parallel:** no (last)
 - **Assigned:** Main Agent (Opus 4.7)
@@ -227,15 +227,20 @@
   - [x] verify: full `pnpm lint` clean (10/10 tasks)
   - [x] verify: full `pnpm test` clean (208 worker-api + 150 react + 2 demo = 360 tests, 1 pre-existing skip)
   - [x] verify: `pnpm --filter @questkit/demo build` succeeds; built bundle contains `0.1.5` (footer wiring confirmed)
-  - [ ] **manual (user):** commit & push to `main` → CI workflow → deploy workflow
-  - [ ] **manual (user):** complete TASK-005 dashboard steps BEFORE deploy if E2E gate green needed: 1. `openssl rand -hex 32` → GH secret `CI_BOT_BYPASS_TOKEN` 2. CF dashboard → WAF custom rule (full expression in `docs/SELF_HOSTING.md` §8.6)
-        (Workers will still deploy without these — only the E2E gate stays red until they land.)
-  - [ ] **manual (user):** verify `https://api.questkit.jairukchan.com/v1/health` returns `version:"0.1.5"`
-  - [ ] **manual (user):** verify footer at `https://questkit.jairukchan.com/` reads `v0.1.5`
-  - [ ] **manual (user):** walkthrough — re-test B1 (/ecommerce claim → coin credits + counter decrements), B3 (/streaming claim → widget reconciles), B4 (/daily claim → streak persists), B5 (/minigames → no "coin" toasts)
+  - [x] commit & push to `main` (commit `7321670`, push 12:35 — CI run `26204334507` in flight)
+  - [ ] **manual (user, post-deploy):** verify `https://api.questkit.jairukchan.com/v1/health` returns `version:"0.1.5"`
+  - [ ] **manual (user, post-deploy):** verify footer at `https://questkit.jairukchan.com/` reads `v0.1.5`
+  - [ ] **manual (user, post-deploy):** walkthrough — re-test B1 (/ecommerce claim → coin credits + counter decrements), B3 (/streaming claim → widget reconciles), B4 (/daily claim → streak persists), B5 (/minigames → no "coin" toasts)
+  - [ ] **manual (user, optional for E2E gate):** complete TASK-005 dashboard steps: 1. `openssl rand -hex 32` → GH secret `CI_BOT_BYPASS_TOKEN` 2. CF dashboard → WAF custom rule (full expression in `docs/SELF_HOSTING.md` §8.6) — without these the E2E step stays red but workers still deploy + bug fixes still land
 - **Progress Notes:**
   - 10:15 - Task created
-  - 12:00 - Code-side complete. Version bumps + CHANGELOG done. All test suites green. Build artifact contains `0.1.5`. Awaiting user commit+push and manual walkthrough. The 5 manual sub-items above are the remaining checklist; everything an agent could finish without dashboard access or a real browser is done.
+  - 12:00 - Code-side complete. Version bumps + CHANGELOG done. All test suites green. Build artifact contains `0.1.5`.
+  - 12:35 - Committed `7321670`, pushed to `main`. CI run `26204334507` in flight; deploy workflow triggers on CI success.
+  - 13:00 - CI `26204334507` → SUCCESS (3m47s). Deploy `26204447641` ran:
+    ✅ D1 migrations applied, all 6 workers deployed (api/consumer/relay/demo/docs/playground), smoke-test green
+    ❌ "Run E2E suite against live deploy" failed — EXPECTED: CF WAF rule + GH secret not yet wired (TASK-005 manual sub-steps).
+    **Production verification:** `curl https://api.questkit.jairukchan.com/v1/health` returns `{"ok":true,"version":"0.1.5","commit":"dev"}` — v0.1.5 IS LIVE.
+    Bug fixes B1/B3/B4/B5 + D1–D6 all shipped. B6 escalated to Phase 10. Walkthrough belongs to user (real browser + DevTools).
 
 ## File Lock Registry
 
