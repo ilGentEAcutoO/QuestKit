@@ -1,6 +1,6 @@
 # QuestKit — Active Tasks
 
-> Last updated: 2026-05-22 11:35 (Sub-agents A + B + C all complete — F5-a minigame in-place mission cards + F5-b balance multi-currency header + F5-c "Documentaries today" re-label all landed; demo test 11/11 GREEN, typecheck GREEN, lint clean modulo pre-existing Node warning; awaiting Lead root-gate verify + release pipeline)
+> Last updated: 2026-05-22 11:55 (TASK-014 v0.1.13 shipped as `3501cb0` — F5-a/b/c all prod-verified GREEN via Playwright `?user=v013_verify` (Lucky Spinner claimed in-place on /minigames, BadgeWall 0→1, balance shows 3 currencies, "Documentaries today" label live); **awaiting user confirmation to /workflow-end archive Phase 9**)
 
 ## RESUME CONTEXT (v0.1.9 hotfix mid-flight)
 
