@@ -1,26 +1,28 @@
 /*
  * QuestKit docs — Tailwind v4 + Docusaurus (Infima) integration.
  *
- * TASK-018 / v0.1.18 (F10) UPDATE: dropped the `important` flag on the
- * tailwindcss import. The prior `@import 'tailwindcss' important;` made
- * EVERY utility !important — including ones that Docusaurus's layout
- * containers (`.theme-doc-root`, `.docMainContainer_*`, `.docPage_*`)
- * coincidentally reused. Tailwind's `display: block !important` won the
- * specificity battle, the layout wrappers lost their `display: flex`,
- * the sidebar (1905px) stacked on top of the main content (1905px), and
- * the whole site rendered as a single tall column with no left rail.
+ * TASK-019 / v0.1.19 (F11) UPDATE: skip Tailwind preflight entirely.
  *
- * Trade-off accepted: MDX examples that use Tailwind utility classes
- * (e.g. `<div class="bg-blue-500">`) may be overridden by Infima
- * compound selectors. Authors needing Tailwind to win can use the `!`
- * modifier per class (`bg-blue-500!`) — Tailwind v4 supports this as
- * the per-class important syntax. This is cleaner than the global flag
- * because it only escalates where it's actually needed, instead of
- * breaking the chrome.
+ * v0.1.18 dropped the `important` flag (was: `@import 'tailwindcss' important;`)
+ * but the layout was STILL broken — sidebar stacked on top of main, no
+ * left-rail flex split. Root cause was Tailwind v4's preflight resetting
+ * `* { margin: 0; padding: 0; ... }` on EVERY element, which clobbered
+ * the spacing Docusaurus's `theme-doc-root` flex layout relies on. The
+ * preflight runs whether or not the `important` flag is set.
  *
- * Reference: https://tailwindcss.com/docs/styling-with-utility-classes#using-the-important-modifier
+ * Fix: explicit imports of theme + utilities only — skip preflight.
+ * Docusaurus's Infima provides its own reset/normalize, so we don't
+ * need Tailwind's. Tailwind utilities (bg-blue-500, p-4, etc.) still
+ * work for MDX examples; only the @reset layer is omitted.
+ *
+ * If a future MDX example needs a Tailwind preflight rule (e.g., the
+ * box-sizing: border-box reset on every element), explicitly add the
+ * single rule to this file rather than re-importing all of preflight.
+ *
+ * Reference: https://tailwindcss.com/docs/preflight#extending-preflight
  */
-@import 'tailwindcss';
+@import 'tailwindcss/theme' layer(theme);
+@import 'tailwindcss/utilities' layer(utilities);
 
 /* Pull in @questkit/react's @theme tokens so MDX examples render with the
  * same OKLCH palette as the demo app — `bg-qk-primary`, `text-qk-coin`, etc. */

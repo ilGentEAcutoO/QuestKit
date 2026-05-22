@@ -5,6 +5,42 @@ All notable changes to QuestKit are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.19] — 2026-05-22 — F11 (docs layout — skip Tailwind preflight)
+
+v0.1.18 dropped the `important` flag from the Tailwind import but the
+layout STAYED broken: sidebar (1905px) still stacked on top of main
+(1905px), display:block on both, no flex split. CSS hash DID change
+(`effaa4b5` → `6de76a20`), so the build was rebuilt and the fix DID
+ship — but it wasn't enough. The root cause was deeper: Tailwind v4
+preflight resets `* { margin: 0; padding: 0; box-sizing: border-box }`
+on every element, regardless of `important` flag, clobbering the
+spacing Docusaurus's `.theme-doc-root` flex layout relies on.
+
+### Fixed
+
+- **`apps/docs/src/css/custom.css` — skip Tailwind preflight (F11).**
+  Was: `@import 'tailwindcss';` (= preflight + theme + utilities).
+  Now: `@import 'tailwindcss/theme' layer(theme);` +
+  `@import 'tailwindcss/utilities' layer(utilities);` — explicitly
+  imports theme + utilities only. Docusaurus's Infima provides its
+  own reset/normalize, so Tailwind's preflight was redundant and
+  destructive. Tailwind utilities (bg-blue-500, p-4, etc.) still
+  work for MDX examples; only the @reset layer is omitted.
+
+### Verification
+
+- `pnpm typecheck` 14/14 packages clean
+- `pnpm lint` 10/10 packages clean
+- Lead release pipeline pending docs re-verify (load
+  https://docs.questkit.jairukchan.com/docs/ → sidebar narrow on
+  left, main wide on right, navbar uncluttered, hamburger menu
+  on mobile widths)
+
+### Cross-references
+
+- TASK-019 in `instruction/work/todos.md`
+- Continues from v0.1.18 (commit `fd27387`)
+
 ## [0.1.18] — 2026-05-22 — F10 (docs site layout fix — drop Tailwind important)
 
 User report: docs site UI still broken after v0.1.17. Console errors
