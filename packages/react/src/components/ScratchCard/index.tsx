@@ -31,6 +31,19 @@
  *   - The radius of the scratch brush is tuned to feel like a fingertip
  *     (20 CSS pixels), large enough to clear the threshold in a handful
  *     of strokes on a 280×160 card.
+ *   - `handlePointerDown` and `handlePointerMove` call `e.preventDefault()`
+ *     as their first line — this suppresses the browser's native
+ *     text-selection and image-drag behaviour on the prize element
+ *     underneath. Without it, dragging the scratch gesture also drags
+ *     a "ghost" of the prize image / selects the prize text, which
+ *     visually disrupts the scratch and makes the card feel broken
+ *     (F6 / v0.1.14). `user-select: none` on both the canvas and the
+ *     prize wrapper is the belt-and-braces defence for cases where a
+ *     pointer event slips past the canvas (e.g. fast drag exits the
+ *     bounding box before pointer capture engages). preventDefault is
+ *     called unconditionally — even when the card is already revealed
+ *     — so a confused re-click on a revealed card doesn't accidentally
+ *     start a text selection on the prize beneath.
  */
 import {
   type ReactElement,
@@ -229,6 +242,11 @@ export function ScratchCard({
 
   const handlePointerDown = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>): void => {
+      // F6 / v0.1.14: suppress the browser's native text-selection +
+      // image-drag default on the prize underneath. MUST run before the
+      // revealed-early-return so that a confused re-click on an
+      // already-revealed card still doesn't trigger a selection.
+      e.preventDefault();
       if (revealedRef.current) return;
       // Reduced-motion fast path: a single click clears the whole card.
       if (reducedMotionRef.current) {
@@ -253,6 +271,10 @@ export function ScratchCard({
 
   const handlePointerMove = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>): void => {
+      // F6 / v0.1.14: some browsers fire `selectstart` / drag-extend on
+      // subsequent pointermoves once a gesture is in flight, so suppress
+      // default unconditionally (cheap; runs no other side effects).
+      e.preventDefault();
       if (!scratchingRef.current || revealedRef.current) return;
       const { x, y } = pointerPos(e);
       eraseAt(x, y);
@@ -350,6 +372,12 @@ export function ScratchCard({
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
+          // F6 / v0.1.14: prevent text-selection / image-drag from
+          // leaking through if a pointer event slips past the canvas
+          // (e.g. fast drag exits the bounding box before pointer
+          // capture engages). Belt-and-braces with the canvas-side
+          // user-select and the handler-side preventDefault.
+          userSelect: "none",
         }}
       >
         {prize}
@@ -374,6 +402,12 @@ export function ScratchCard({
           width,
           height,
           touchAction: "none",
+          // F6 / v0.1.14: defence-in-depth alongside the handler-side
+          // preventDefault — browsers without selection-from-canvas
+          // (most) ignore this; the few that try to start a text
+          // selection on canvas drag (mostly older Safari WebKit) are
+          // shut down here.
+          userSelect: "none",
           cursor: "grab",
           display: "block",
         }}

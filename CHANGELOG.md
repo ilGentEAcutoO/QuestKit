@@ -5,6 +5,78 @@ All notable changes to QuestKit are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.14] — 2026-05-22 — F6 fix (ScratchCard preventDefault + no-select)
+
+User report (post-v0.1.13 thorough test): "scratch card ก็ scratch ไม่ได้
+เพราะรูปข้างหลังมันติดเมาส์มาด้วย" ("can't scratch because the image/text
+behind drags with mouse"). Real bug — missed in v0.1.13 prod verify
+because the test used synthetic `dispatchEvent` pointer events which
+produce UNTRUSTED events whose `defaultPrevented` is a no-op against
+browser default behaviour. Real users (trusted events) hit the bug.
+
+### Fixed
+
+- **`packages/react/src/components/ScratchCard/index.tsx` —
+  `handlePointerDown` and `handlePointerMove` now call
+  `e.preventDefault()` as their FIRST action (F6).** Before this,
+  browser default behaviour (text selection on the underlying prize
+  text spans, possible HTML5 drag-and-drop on `<img>` prizes) ran
+  concurrently with the scratch logic and visually "dragged" the
+  prize content with the cursor. preventDefault before the
+  `revealedRef.current` early-return so re-clicks on a revealed card
+  also suppress browser default (matches user expectation).
+- **canvas + `.qk-scratchcard__prize` wrapper now carry
+  `userSelect: "none"` (F6).** Belt-and-suspenders for the
+  preventDefault: even if a future refactor drops the handler
+  preventDefault, the canvas + prize text can't be selected anyway.
+- **`apps/demo/src/routes/minigames.tsx` prize wrapper also carries
+  `userSelect: "none"` (F6).** Consumer-level defence-in-depth for
+  the demo's specific prize JSX.
+
+### Why this slipped through
+
+Lead's v0.1.13 prod verify dispatched pointer events via
+`canvas.dispatchEvent(new PointerEvent(...))` and saw "Prize revealed"
+text appear — concluded scratch worked. But synthetic events bypass
+browser default action entirely; the bug exists only under trusted
+input. Future scratch/drag tests must use real Playwright pointer
+APIs (`page.mouse.move/down/up`) or assert `preventDefault` is wired,
+not rely on observing the synthetic-event outcome.
+
+### Other "v0.1.13 bugs" — explained, not fixed
+
+Same user report flagged two more concerns that turned out to be
+correct-per-design behaviours rather than bugs:
+
+- **"Spin wheel ได้ Sparkle แต่ badge ไม่ขึ้น"** — Lucky Spinner
+  mission requires 5 spins + claim. One spin = 1/5 progress
+  visible on the in-place card (F5-a). UX is working as specified.
+- **"Curious Mind ค้าง 1/3"** — widget mirrors
+  `mis_stream_documentary_3` (documentaries-only filter). F5-c
+  renamed the label to "Documentaries today" to make this
+  explicit. Clicking drama/action/comedy/sport advances Daily
+  Watcher (1/1 target) and Deep Diver (10/week, post-F4-a) but
+  NOT Curious Mind — by design.
+
+These are Phase 10 candidates if more discoverability work is
+warranted (e.g., a "Mission breakdown by event" toast or a
+filter pill row above the Library).
+
+### Verification
+
+- `pnpm typecheck` 14/14 packages clean
+- `pnpm lint` 10/10 packages clean (modulo pre-existing Node ESM warning)
+- `pnpm test` 500+ tests, 0 failures, 1 pre-existing skip:
+  - `@questkit/react`: 156 tests (was 152, +4 from F6 ScratchCard regression)
+  - `@questkit/demo`: 11 tests (unchanged)
+  - `@questkit/worker-api`: 216 tests (unchanged)
+- Lead release pipeline pending Playwright prod re-verify
+
+### Cross-references
+
+- TASK-015 in `instruction/work/todos.md` for full evidence
+- Continues from v0.1.13 (commit `3501cb0`)
+
 ## [0.1.13] — 2026-05-22 — F5 UX batch (in-place minigame cards + multi-currency balance + Documentaries label)
 
 User thorough re-test of v0.1.12 surfaced three UX gaps that obscured

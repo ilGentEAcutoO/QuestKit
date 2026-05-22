@@ -413,3 +413,231 @@ describe("scratchCard — reduced motion", () => {
     }
   });
 });
+
+describe("scratchCard — F6 regression (browser default suppression / v0.1.14)", () => {
+  /**
+   * F6 root cause: `handlePointerDown` / `handlePointerMove` did NOT
+   * call `preventDefault`. The browser's native text-selection on the
+   * prize span and image-drag on any prize <img> ran concurrently with
+   * the scratch gesture, dragging a ghost of the prize with the cursor
+   * and visually breaking the scratch effect. Lead's prior Playwright
+   * test used synthetic `dispatchEvent` which does NOT trigger browser
+   * default behaviour (untrusted events have `defaultPrevented` no-op
+   * semantics), so the bug slipped through automated coverage and only
+   * surfaced under real-user pointer input.
+   *
+   * These tests pin the contract: every pointerdown + every pointermove
+   * MUST call `preventDefault` on the React synthetic event, the canvas
+   * + the prize wrapper MUST carry `user-select: none`, and the
+   * preventDefault MUST run even when the card is already revealed (a
+   * confused re-click on a revealed card still shouldn't start a text
+   * selection on the prize beneath).
+   */
+
+  it("handlePointerDown calls preventDefault as its first action", () => {
+    const fake = installFakeCanvas({ erasedRatio: 0 });
+    const raf = installSyncRaf();
+    try {
+      render(
+        <ScratchCard
+          prize={<span>Prize</span>}
+          onReveal={() => {}}
+          width={40}
+          height={20}
+        />,
+      );
+      const canvas = screen.getByTestId(
+        "qk-scratchcard-canvas",
+      ) as HTMLCanvasElement;
+      const restoreRect = stubRect(canvas, {
+        x: 0,
+        y: 0,
+        top: 0,
+        left: 0,
+        right: 40,
+        bottom: 20,
+        width: 40,
+        height: 20,
+        toJSON: () => ({}),
+      } as DOMRect);
+
+      // Construct a real PointerEvent so we can observe `defaultPrevented`
+      // (React forwards `preventDefault` through to the underlying native
+      // event when called inside a synthetic-event handler).
+      const evt = new Event("pointerdown", {
+        bubbles: true,
+        cancelable: true,
+      }) as Event & {
+        pointerId: number;
+        clientX: number;
+        clientY: number;
+      };
+      evt.pointerId = 1;
+      evt.clientX = 10;
+      evt.clientY = 10;
+      expect(evt.defaultPrevented).toBe(false);
+      act(() => {
+        canvas.dispatchEvent(evt);
+        raf.flush();
+      });
+      expect(evt.defaultPrevented).toBe(true);
+      restoreRect();
+    } finally {
+      fake.restore();
+      raf.restore();
+    }
+  });
+
+  it("handlePointerMove calls preventDefault even when not actively scratching", () => {
+    // No prior pointerdown — scratchingRef is false, the move-handler
+    // would early-return BEFORE the fix; after the fix preventDefault
+    // still runs.
+    const fake = installFakeCanvas({ erasedRatio: 0 });
+    const raf = installSyncRaf();
+    try {
+      render(
+        <ScratchCard
+          prize={<span>Prize</span>}
+          onReveal={() => {}}
+          width={40}
+          height={20}
+        />,
+      );
+      const canvas = screen.getByTestId(
+        "qk-scratchcard-canvas",
+      ) as HTMLCanvasElement;
+      const restoreRect = stubRect(canvas, {
+        x: 0,
+        y: 0,
+        top: 0,
+        left: 0,
+        right: 40,
+        bottom: 20,
+        width: 40,
+        height: 20,
+        toJSON: () => ({}),
+      } as DOMRect);
+
+      const evt = new Event("pointermove", {
+        bubbles: true,
+        cancelable: true,
+      }) as Event & {
+        pointerId: number;
+        clientX: number;
+        clientY: number;
+      };
+      evt.pointerId = 1;
+      evt.clientX = 10;
+      evt.clientY = 10;
+      expect(evt.defaultPrevented).toBe(false);
+      act(() => {
+        canvas.dispatchEvent(evt);
+        raf.flush();
+      });
+      expect(evt.defaultPrevented).toBe(true);
+      restoreRect();
+    } finally {
+      fake.restore();
+      raf.restore();
+    }
+  });
+
+  it("handlePointerDown still calls preventDefault after the card is revealed", () => {
+    // Pin the "re-click on a revealed card still suppresses native
+    // selection" contract — the preventDefault must precede the
+    // `revealedRef.current` early-return.
+    const fake = installFakeCanvas({ erasedRatio: 0.9 });
+    const raf = installSyncRaf();
+    const onReveal = jest.fn();
+    try {
+      render(
+        <ScratchCard
+          prize={<span>Prize</span>}
+          onReveal={onReveal}
+          width={40}
+          height={20}
+        />,
+      );
+      const canvas = screen.getByTestId(
+        "qk-scratchcard-canvas",
+      ) as HTMLCanvasElement;
+      const restoreRect = stubRect(canvas, {
+        x: 0,
+        y: 0,
+        top: 0,
+        left: 0,
+        right: 40,
+        bottom: 20,
+        width: 40,
+        height: 20,
+        toJSON: () => ({}),
+      } as DOMRect);
+
+      // First gesture reveals.
+      act(() => {
+        fireEvent.pointerDown(canvas, {
+          clientX: 10,
+          clientY: 10,
+          pointerId: 1,
+        });
+        raf.flush();
+      });
+      expect(onReveal).toHaveBeenCalledTimes(1);
+
+      // Second gesture on the same now-revealed canvas should still
+      // call preventDefault.
+      const secondEvt = new Event("pointerdown", {
+        bubbles: true,
+        cancelable: true,
+      }) as Event & {
+        pointerId: number;
+        clientX: number;
+        clientY: number;
+      };
+      secondEvt.pointerId = 2;
+      secondEvt.clientX = 20;
+      secondEvt.clientY = 10;
+      act(() => {
+        canvas.dispatchEvent(secondEvt);
+        raf.flush();
+      });
+      expect(secondEvt.defaultPrevented).toBe(true);
+      // And onReveal stays at 1 — preventDefault doesn't accidentally
+      // re-fire reveal.
+      expect(onReveal).toHaveBeenCalledTimes(1);
+      restoreRect();
+    } finally {
+      fake.restore();
+      raf.restore();
+    }
+  });
+
+  it("canvas and prize wrapper both carry user-select: none inline style", () => {
+    const fake = installFakeCanvas({ erasedRatio: 0 });
+    try {
+      const { container } = render(
+        <ScratchCard
+          prize={<span data-testid="prize-text">Prize</span>}
+          onReveal={() => {}}
+          width={40}
+          height={20}
+        />,
+      );
+      const canvas = screen.getByTestId(
+        "qk-scratchcard-canvas",
+      ) as HTMLCanvasElement;
+      // jsdom doesn't compute styles, but inline style is queryable
+      // directly via the .style property. `user-select` maps to
+      // `userSelect` on CSSStyleDeclaration.
+      expect(canvas.style.userSelect).toBe("none");
+
+      const prizeWrapper = container.querySelector(
+        ".qk-scratchcard__prize",
+      ) as HTMLElement | null;
+      expect(prizeWrapper).not.toBeNull();
+      expect(prizeWrapper?.style.userSelect).toBe("none");
+    } finally {
+      fake.restore();
+    }
+  });
+});

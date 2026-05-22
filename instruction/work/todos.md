@@ -1,6 +1,6 @@
 # QuestKit — Active Tasks
 
-> Last updated: 2026-05-22 11:55 (TASK-014 v0.1.13 shipped as `3501cb0` — F5-a/b/c all prod-verified GREEN via Playwright `?user=v013_verify` (Lucky Spinner claimed in-place on /minigames, BadgeWall 0→1, balance shows 3 currencies, "Documentaries today" label live); **awaiting user confirmation to /workflow-end archive Phase 9**)
+> Last updated: 2026-05-22 12:25 (TASK-015 v0.1.14 hotfix in flight — sub-agent SC fix for F6 (scratch card preventDefault + user-select) complete; awaiting Lead release pipeline)
 
 ## RESUME CONTEXT (v0.1.9 hotfix mid-flight)
 
@@ -612,53 +612,82 @@ If next session asks "มีงานค้างไหม":
   - 2026-05-22 11:30 - Sub-agent C complete (F5-c watched-today re-label). Copy-only fix, no behaviour change. `apps/demo/src/routes/streaming.tsx`: heading "Watched today" → "Documentaries today" (kept single-line — same `text-sm font-semibold` `<p>`, layout unchanged); section aria-label "Today's progress" → "Today's documentary progress"; counter aria-label `"${n} of ${target} watched"` → `"${n} of ${target} documentaries watched today"`. Sub-text "Unlock the Binge Starter badge at {targetCount}." kept verbatim (already accurate). Pinning comment at L82-91 extended to explain why the heading was retitled (the documentary-only filter discriminator was hidden by the old generic "Watched today" wording — users clicking drama/comedy/sport were confused that the counter didn't tick). `apps/demo/e2e/claim-flow.spec.ts:162` updated: regex `/3 of 3 watched/i` → `/3 of 3 documentaries watched today/i` (the only label assertion in the suite). Demo gates: test 8/8 in 3 suites GREEN; typecheck clean; lint clean for streaming.tsx + claim-flow.spec.ts (verified via `npx eslint` on just my two files — the 2 remaining demo-lint errors are B's still-in-flight Layout.tsx / Layout.test.tsx, out of C's scope). No other tests assert on the widget text (`Layout.test.tsx`, `client.test.tsx`, `useMissionClaim.test.tsx` don't touch streaming). Locks released below.
   - 2026-05-22 11:35 - Sub-agent B complete (F5-b balance multi-currency). `useBalance` API: overloaded — `useBalance(currency)` returns `HookState<Balance|null>` (single); `useBalance()` (no args) returns `HookState<Balance[]>` (one row per server-known currency, upserted from `balance.changed` SSE). VISUAL FORMAT: hybrid — coin keeps its prominent `<CoinIcon />` SVG + brand-color treatment from the previous design (so the existing visual identity isn't lost); gem + point sit alongside as compact glyph chips (`◆ N gem`, `★ N point`) divided by left-borders using `var(--color-demo-border)`. Chose this over a pure-inline list ("0 coin · 5 gem · 200 point") so the established coin pulse animation + brand glyph stay anchored; chose this over uniform badges so coin remains visually dominant (matches what users were trained on across v0.1.0–v0.1.12). WIDGET DECISION: demo-only inline JSX via a local `BalanceMulti` component in Layout.tsx — packages/react/CoinBalance has `currency: string` as REQUIRED so it's single-currency by design; extending it cross-package was out of scope per dispatch rules (lead-decides on scope). Inline JSX mirrors the existing `CoinBalancePulse` it replaced. Three known demo currencies (coin/gem/point) are constants in Layout.tsx (DEMO_CURRENCIES) — backfilled to 0 when server has no row yet so a fresh user sees what currencies exist before claiming Variety Pack (+5 gem) or Deep Diver (+500 point). Pulse animation key is concatenated state (`${coin}|${gem}|${point}`) so any currency mint re-runs the scale animation. `aria-label` now reads "Current balance: 7 coin, 2 gem, 0 point" — all three currencies announced for screen readers. TESTS: 3 new specs added under `describe("layout header balance — multi-currency (TASK-014 / F5-b)")`: (1) all three currencies render with `data-currency` attrs + visible labels even when server returns only coin; (2) server-returned amounts (120 coin / 5 gem / 500 point) reflected per chip; (3) aria-label includes all three currency names + amounts (regex match `7 coin`, `2 gem`, `0 point`). Test mock extended to accept optional `balances?: Balance[]` so each spec tailors what the server "has"; existing footer tests still work via default coinBalance fallback. GATES: demo test 11/11 in 3 suites GREEN (+3 over 8 baseline; Layout.test.tsx jumped from 2→5 tests); typecheck clean; lint clean (modulo pre-existing MODULE_TYPELESS_PACKAGE_JSON Node warning unrelated to F5-b). Locks released below.
 
+### Task: [TASK-015] v0.1.14 hotfix — F6 fix (ScratchCard preventDefault + user-select)
+
+- **Status:** 🔵 in-progress (sub-agent SC done; awaiting Lead release pipeline)
+- **Priority:** P0 (user-reported, breaks scratch interaction)
+- **Parallel:** no (single self-contained component fix)
+- **Assigned:** Lead (Opus 4.7) + sub-agent SC (Opus 4.7)
+- **Depends on:** TASK-014 (v0.1.13 shipped)
+- **Skills:** git-commit, git-push, deploy
+- **Covers:** F6 — ScratchCard pointer handlers omitted `e.preventDefault()`, so the browser's native text-selection on the prize span (and image-drag on any prize `<img>`) ran concurrently with the scratch gesture, dragging a "ghost" of the prize with the cursor and visually breaking the scratch effect. User-reported: "scratch card ก็ scratch ไม่ได้เพราะรูปข้างหลังมันติดเมาส์มาด้วย". Slipped past prior Playwright coverage because synthetic `dispatchEvent` produces untrusted events that don't trigger browser default behaviour.
+- **Root cause:** `packages/react/src/components/ScratchCard/index.tsx` `handlePointerDown` (L230) and `handlePointerMove` (L254) did not call `e.preventDefault()`; the canvas + prize wrapper did not carry `user-select: none`.
+- **Files (sub-agent SC):**
+  - `packages/react/src/components/ScratchCard/index.tsx` — `preventDefault` as FIRST line in both `handlePointerDown` and `handlePointerMove` (precedes the `revealedRef.current` early-return so re-clicks on a revealed card still suppress native selection); `userSelect: "none"` on the canvas inline style and the `.qk-scratchcard__prize` wrapper; docblock extended with a "F6 / v0.1.14" sub-bullet under "Performance & input quirks".
+  - `packages/react/test/components/ScratchCard.test.tsx` — 4 new specs under `describe("scratchCard — F6 regression (browser default suppression / v0.1.14)")`: (1) `pointerdown` calls preventDefault, (2) `pointermove` calls preventDefault even when not actively scratching, (3) `pointerdown` still calls preventDefault after the card is revealed, (4) canvas + prize wrapper both carry `user-select: none`. Uses native `Event` dispatch (cancelable) to observe `defaultPrevented`, which React forwards through synthetic-event `preventDefault()` calls.
+  - `apps/demo/src/routes/minigames.tsx` — `userSelect: "none"` on the scratch prize wrapper (consumer-level defence-in-depth; a future Tailwind utility could override the component-internal inline style, so pinning at the demo route makes the contract explicit).
+- **Subtasks:**
+  - [x] SC: add `e.preventDefault()` as first line in `handlePointerDown` + `handlePointerMove`
+  - [x] SC: add `userSelect: "none"` on canvas + prize wrapper (component) + scratch prize wrapper (demo route)
+  - [x] SC: docblock note (F6 / v0.1.14)
+  - [x] SC: 4 regression tests
+  - [x] SC: gates — react test 156/0 (+4), react typecheck clean, react lint clean (modulo pre-existing Node MODULE_TYPELESS_PACKAGE_JSON warning), demo test 11/0, demo typecheck clean, demo lint clean (same Node warning)
+  - [ ] verify (Lead): root gates GREEN
+  - [ ] bump (Lead): version 0.1.13 → 0.1.14 + CHANGELOG
+  - [ ] commit + push + prod verify (Lead)
+- **Progress Notes:**
+  - 2026-05-22 12:25 - Sub-agent SC complete. Diagnosis confirmed against source: `handlePointerDown` (L230-252 pre-fix) and `handlePointerMove` (L254-261 pre-fix) had no `e.preventDefault()` — only `handleKeyDown` did, on the Space-key branch. Fix applied as first line in both handlers (`preventDefault` precedes the `revealedRef.current` / `scratchingRef.current` early-returns so re-clicks on a revealed card still suppress native selection). `userSelect: "none"` added to canvas inline style + `.qk-scratchcard__prize` wrapper + scratch prize wrapper in `apps/demo/src/routes/minigames.tsx`. No vendor prefixes added — repo grep on `WebkitUserSelect|MozUserSelect` showed zero existing usage; the modern unprefixed `user-select` covers all evergreen browsers we target. 4 new regression specs added: synthesised native `Event` with `cancelable:true` dispatched on the canvas, then asserted `evt.defaultPrevented === true` after the handler runs (React forwards `preventDefault` from the synthetic event through to the underlying native event). Test scenarios cover: (a) the active-scratch pointerdown case, (b) pointermove when no scratch is in flight (early-return path still suppresses default), (c) the user-confusion case of re-clicking an already-revealed card (preventDefault must run BEFORE the revealedRef early-return — that's the contract the test pins). Gates all GREEN; locks released. Hands off to Lead for version bump + CHANGELOG + release pipeline.
+
 ## File Lock Registry
 
-| File                                                                              | Locked by           | Task                        | Since                  |
-| --------------------------------------------------------------------------------- | ------------------- | --------------------------- | ---------------------- |
-| _(TASK-005 file locks released 11:30 — code complete)_                            | —                   | —                           | —                      |
-| ~~`packages/types/src/sdk-update.ts`~~ released 11:45                             | ~~TASK-001 Agent~~  | TASK-001 (done)             | 2026-05-21 11:20–11:45 |
-| ~~`packages/react/src/hooks/useMissions.ts`~~ released 11:45                      | ~~TASK-001 Agent~~  | TASK-001 (done)             | 2026-05-21 11:20–11:45 |
-| ~~`packages/react/test/hooks/useMissions.test.tsx`~~ released 11:45               | ~~TASK-001 Agent~~  | TASK-001 (done)             | 2026-05-21 11:20–11:45 |
-| ~~`packages/react/test/components/MissionCard.test.tsx`~~ released 11:45          | ~~TASK-001 Agent~~  | TASK-001 (done)             | 2026-05-21 11:20–11:45 |
-| ~~`workers/api/src/routes/missions.ts`~~ released 11:45                           | ~~TASK-001 Agent~~  | TASK-001 (done)             | 2026-05-21 11:20–11:45 |
-| ~~`workers/api/src/routes/missions.test.ts`~~ released 11:45                      | ~~TASK-001 Agent~~  | TASK-001 (done)             | 2026-05-21 11:20–11:45 |
-| ~~`apps/demo/src/lib/useMissionClaim.ts`~~ released 11:45                         | ~~TASK-001 Agent~~  | TASK-001 (done)             | 2026-05-21 11:20–11:45 |
-| ~~`workers/api/src/services/ai.ts`~~ released 11:55                               | ~~task-006-agent~~  | TASK-006 (closed-escalated) | 2026-05-21 11:25–11:55 |
-| ~~`apps/demo/src/routes/minigames.tsx`~~ released 11:30                           | ~~TASK-003 Agent~~  | TASK-003 (done)             | 2026-05-21 11:05–11:30 |
-| ~~`apps/demo/e2e/minigames.spec.ts`~~ released 11:30                              | ~~TASK-003 Agent~~  | TASK-003 (done)             | 2026-05-21 11:05–11:30 |
-| ~~`workers/api/test/events.route.test.ts`~~ released 11:30                        | ~~TASK-003 Agent~~  | TASK-003 (done)             | 2026-05-21 11:05–11:30 |
-| ~~`apps/demo/src/components/Layout.tsx`~~ released 11:45                          | ~~TASK-004 Agent~~  | TASK-004 (done)             | 2026-05-21 11:25–11:45 |
-| ~~`apps/demo/src/components/Layout.test.tsx`~~ released 11:45                     | ~~TASK-004 Agent~~  | TASK-004 (done)             | 2026-05-21 11:25–11:45 |
-| ~~`workers/api/src/rules/evaluator.test.ts`~~ released 11:45                      | ~~TASK-004 Agent~~  | TASK-004 (done)             | 2026-05-21 11:25–11:45 |
-| ~~`apps/demo/src/routes/streaming.tsx`~~ released 12:30                           | ~~TASK-002 Agent~~  | TASK-002 (done)             | 2026-05-21 12:10–12:30 |
-| ~~`apps/demo/src/routes/daily.tsx`~~ released 12:30                               | ~~TASK-002 Agent~~  | TASK-002 (done)             | 2026-05-21 12:10–12:30 |
-| ~~`apps/demo/e2e/claim-flow.spec.ts`~~ (new) released 12:30                       | ~~TASK-002 Agent~~  | TASK-002 (done)             | 2026-05-21 12:10–12:30 |
-| ~~`apps/demo/e2e/daily.spec.ts`~~ released 12:30                                  | ~~TASK-002 Agent~~  | TASK-002 (done)             | 2026-05-21 12:10–12:30 |
-| ~~`apps/demo/e2e/streaming.spec.ts`~~ released 12:30                              | ~~TASK-002 Agent~~  | TASK-002 (done)             | 2026-05-21 12:10–12:30 |
-| ~~`apps/demo/src/components/DemoToastHost.tsx`~~ released 06:50                   | ~~D (demo-fix)~~    | TASK-010 (D-done)           | 2026-05-22 06:29–06:50 |
-| ~~`apps/demo/src/lib/useMissionClaim.ts`~~ released 06:50                         | ~~D (demo-fix)~~    | TASK-010 (D-done)           | 2026-05-22 06:29–06:50 |
-| ~~`apps/demo/src/lib/useMissionClaim.test.tsx`~~ (new) released 06:50             | ~~D (demo-fix)~~    | TASK-010 (D-done)           | 2026-05-22 06:29–06:50 |
-| ~~`apps/demo/src/lib/client.tsx`~~ released 07:50                                 | ~~V (per-browser)~~ | TASK-011 (V-done)           | 2026-05-22 07:35–07:50 |
-| ~~`apps/demo/src/lib/client.test.tsx`~~ (new) released 07:50                      | ~~V (per-browser)~~ | TASK-011 (V-done)           | 2026-05-22 07:35–07:50 |
-| ~~`apps/demo/src/lib/demoUserId.ts`~~ (new, Option A) released 07:50              | ~~V (per-browser)~~ | TASK-011 (V-done)           | 2026-05-22 07:38–07:50 |
-| ~~`package.json` (0.1.9 → 0.1.10)~~ released 07:50                                | ~~V (per-browser)~~ | TASK-011 (V-done)           | 2026-05-22 07:35–07:50 |
-| ~~`workers/api/src/index.ts` (/v1/health 0.1.9 → 0.1.10)~~ released 07:50         | ~~V (per-browser)~~ | TASK-011 (V-done)           | 2026-05-22 07:35–07:50 |
-| ~~`CHANGELOG.md` (v0.1.10 entry)~~ released 07:50                                 | ~~V (per-browser)~~ | TASK-011 (V-done)           | 2026-05-22 07:35–07:50 |
-| ~~`packages/react/src/hooks/useMissions.ts`~~ released 08:18                      | ~~F (F3-fix)~~      | TASK-012 (F-done)           | 2026-05-22 08:00–08:18 |
-| ~~`packages/react/test/hooks/useMissions.test.tsx`~~ released 08:18               | ~~F (F3-fix)~~      | TASK-012 (F-done)           | 2026-05-22 08:00–08:18 |
-| ~~`apps/demo/src/lib/useMissionClaim.ts`~~ released 08:18                         | ~~F (F3-fix)~~      | TASK-012 (F-done)           | 2026-05-22 08:00–08:18 |
-| ~~`package.json` (0.1.10 → 0.1.11)~~ released 08:18                               | ~~F (F3-fix)~~      | TASK-012 (F-done)           | 2026-05-22 08:00–08:18 |
-| ~~`workers/api/src/index.ts` (/v1/health 0.1.10 → 0.1.11)~~ released 08:18        | ~~F (F3-fix)~~      | TASK-012 (F-done)           | 2026-05-22 08:00–08:18 |
-| ~~`CHANGELOG.md` (v0.1.11 entry)~~ released 08:18                                 | ~~F (F3-fix)~~      | TASK-012 (F-done)           | 2026-05-22 08:00–08:18 |
-| ~~`packages/react/src/components/SpinWheel/index.tsx`~~ released 09:55            | ~~S (F4-c)~~        | TASK-013 (S-done)           | 2026-05-22 09:35–09:55 |
-| ~~`packages/react/test/components/SpinWheel.test.tsx`~~ released 09:55            | ~~S (F4-c)~~        | TASK-013 (S-done)           | 2026-05-22 09:35–09:55 |
-| ~~`workers/api/src/services/ingest.ts`~~ released 10:05                           | ~~E (F4-b)~~        | TASK-013 (E-done)           | 2026-05-22 09:35–10:05 |
-| ~~`workers/api/test/events.route.test.ts`~~ released 10:05                        | ~~E (F4-b)~~        | TASK-013 (E-done)           | 2026-05-22 09:35–10:05 |
-| ~~`workers/api/migrations/0005_fix_deep_diver_rule.sql`~~ (new) released 09:55    | ~~M (F4-a)~~        | TASK-013 (M-done)           | 2026-05-22 09:35–09:55 |
-| ~~`workers/api/src/rules/evaluator.test.ts`~~ (extended, +5 tests) released 09:55 | ~~M (F4-a)~~        | TASK-013 (M-done)           | 2026-05-22 09:40–09:55 |
-| ~~`apps/demo/src/routes/minigames.tsx`~~ released 2026-05-22 11:15                | ~~A (F5-a)~~        | TASK-014 (A-done)           | 2026-05-22 11:00–11:15 |
-| ~~`apps/demo/src/routes/streaming.tsx`~~ released 2026-05-22 11:30                | ~~C (F5-c)~~        | TASK-014 (C-done)           | 2026-05-22 11:20–11:30 |
-| ~~`apps/demo/e2e/claim-flow.spec.ts`~~ released 2026-05-22 11:30                  | ~~C (F5-c)~~        | TASK-014 (C-done)           | 2026-05-22 11:20–11:30 |
-| ~~`apps/demo/src/components/Layout.tsx`~~ released 2026-05-22 11:35               | ~~B (F5-b)~~        | TASK-014 (B-done)           | 2026-05-22 11:20–11:35 |
-| ~~`apps/demo/src/components/Layout.test.tsx`~~ released 2026-05-22 11:35          | ~~B (F5-b)~~        | TASK-014 (B-done)           | 2026-05-22 11:20–11:35 |
+| File                                                                                | Locked by           | Task                        | Since                  |
+| ----------------------------------------------------------------------------------- | ------------------- | --------------------------- | ---------------------- |
+| _(TASK-005 file locks released 11:30 — code complete)_                              | —                   | —                           | —                      |
+| ~~`packages/types/src/sdk-update.ts`~~ released 11:45                               | ~~TASK-001 Agent~~  | TASK-001 (done)             | 2026-05-21 11:20–11:45 |
+| ~~`packages/react/src/hooks/useMissions.ts`~~ released 11:45                        | ~~TASK-001 Agent~~  | TASK-001 (done)             | 2026-05-21 11:20–11:45 |
+| ~~`packages/react/test/hooks/useMissions.test.tsx`~~ released 11:45                 | ~~TASK-001 Agent~~  | TASK-001 (done)             | 2026-05-21 11:20–11:45 |
+| ~~`packages/react/test/components/MissionCard.test.tsx`~~ released 11:45            | ~~TASK-001 Agent~~  | TASK-001 (done)             | 2026-05-21 11:20–11:45 |
+| ~~`workers/api/src/routes/missions.ts`~~ released 11:45                             | ~~TASK-001 Agent~~  | TASK-001 (done)             | 2026-05-21 11:20–11:45 |
+| ~~`workers/api/src/routes/missions.test.ts`~~ released 11:45                        | ~~TASK-001 Agent~~  | TASK-001 (done)             | 2026-05-21 11:20–11:45 |
+| ~~`apps/demo/src/lib/useMissionClaim.ts`~~ released 11:45                           | ~~TASK-001 Agent~~  | TASK-001 (done)             | 2026-05-21 11:20–11:45 |
+| ~~`workers/api/src/services/ai.ts`~~ released 11:55                                 | ~~task-006-agent~~  | TASK-006 (closed-escalated) | 2026-05-21 11:25–11:55 |
+| ~~`apps/demo/src/routes/minigames.tsx`~~ released 11:30                             | ~~TASK-003 Agent~~  | TASK-003 (done)             | 2026-05-21 11:05–11:30 |
+| ~~`apps/demo/e2e/minigames.spec.ts`~~ released 11:30                                | ~~TASK-003 Agent~~  | TASK-003 (done)             | 2026-05-21 11:05–11:30 |
+| ~~`workers/api/test/events.route.test.ts`~~ released 11:30                          | ~~TASK-003 Agent~~  | TASK-003 (done)             | 2026-05-21 11:05–11:30 |
+| ~~`apps/demo/src/components/Layout.tsx`~~ released 11:45                            | ~~TASK-004 Agent~~  | TASK-004 (done)             | 2026-05-21 11:25–11:45 |
+| ~~`apps/demo/src/components/Layout.test.tsx`~~ released 11:45                       | ~~TASK-004 Agent~~  | TASK-004 (done)             | 2026-05-21 11:25–11:45 |
+| ~~`workers/api/src/rules/evaluator.test.ts`~~ released 11:45                        | ~~TASK-004 Agent~~  | TASK-004 (done)             | 2026-05-21 11:25–11:45 |
+| ~~`apps/demo/src/routes/streaming.tsx`~~ released 12:30                             | ~~TASK-002 Agent~~  | TASK-002 (done)             | 2026-05-21 12:10–12:30 |
+| ~~`apps/demo/src/routes/daily.tsx`~~ released 12:30                                 | ~~TASK-002 Agent~~  | TASK-002 (done)             | 2026-05-21 12:10–12:30 |
+| ~~`apps/demo/e2e/claim-flow.spec.ts`~~ (new) released 12:30                         | ~~TASK-002 Agent~~  | TASK-002 (done)             | 2026-05-21 12:10–12:30 |
+| ~~`apps/demo/e2e/daily.spec.ts`~~ released 12:30                                    | ~~TASK-002 Agent~~  | TASK-002 (done)             | 2026-05-21 12:10–12:30 |
+| ~~`apps/demo/e2e/streaming.spec.ts`~~ released 12:30                                | ~~TASK-002 Agent~~  | TASK-002 (done)             | 2026-05-21 12:10–12:30 |
+| ~~`apps/demo/src/components/DemoToastHost.tsx`~~ released 06:50                     | ~~D (demo-fix)~~    | TASK-010 (D-done)           | 2026-05-22 06:29–06:50 |
+| ~~`apps/demo/src/lib/useMissionClaim.ts`~~ released 06:50                           | ~~D (demo-fix)~~    | TASK-010 (D-done)           | 2026-05-22 06:29–06:50 |
+| ~~`apps/demo/src/lib/useMissionClaim.test.tsx`~~ (new) released 06:50               | ~~D (demo-fix)~~    | TASK-010 (D-done)           | 2026-05-22 06:29–06:50 |
+| ~~`apps/demo/src/lib/client.tsx`~~ released 07:50                                   | ~~V (per-browser)~~ | TASK-011 (V-done)           | 2026-05-22 07:35–07:50 |
+| ~~`apps/demo/src/lib/client.test.tsx`~~ (new) released 07:50                        | ~~V (per-browser)~~ | TASK-011 (V-done)           | 2026-05-22 07:35–07:50 |
+| ~~`apps/demo/src/lib/demoUserId.ts`~~ (new, Option A) released 07:50                | ~~V (per-browser)~~ | TASK-011 (V-done)           | 2026-05-22 07:38–07:50 |
+| ~~`package.json` (0.1.9 → 0.1.10)~~ released 07:50                                  | ~~V (per-browser)~~ | TASK-011 (V-done)           | 2026-05-22 07:35–07:50 |
+| ~~`workers/api/src/index.ts` (/v1/health 0.1.9 → 0.1.10)~~ released 07:50           | ~~V (per-browser)~~ | TASK-011 (V-done)           | 2026-05-22 07:35–07:50 |
+| ~~`CHANGELOG.md` (v0.1.10 entry)~~ released 07:50                                   | ~~V (per-browser)~~ | TASK-011 (V-done)           | 2026-05-22 07:35–07:50 |
+| ~~`packages/react/src/hooks/useMissions.ts`~~ released 08:18                        | ~~F (F3-fix)~~      | TASK-012 (F-done)           | 2026-05-22 08:00–08:18 |
+| ~~`packages/react/test/hooks/useMissions.test.tsx`~~ released 08:18                 | ~~F (F3-fix)~~      | TASK-012 (F-done)           | 2026-05-22 08:00–08:18 |
+| ~~`apps/demo/src/lib/useMissionClaim.ts`~~ released 08:18                           | ~~F (F3-fix)~~      | TASK-012 (F-done)           | 2026-05-22 08:00–08:18 |
+| ~~`package.json` (0.1.10 → 0.1.11)~~ released 08:18                                 | ~~F (F3-fix)~~      | TASK-012 (F-done)           | 2026-05-22 08:00–08:18 |
+| ~~`workers/api/src/index.ts` (/v1/health 0.1.10 → 0.1.11)~~ released 08:18          | ~~F (F3-fix)~~      | TASK-012 (F-done)           | 2026-05-22 08:00–08:18 |
+| ~~`CHANGELOG.md` (v0.1.11 entry)~~ released 08:18                                   | ~~F (F3-fix)~~      | TASK-012 (F-done)           | 2026-05-22 08:00–08:18 |
+| ~~`packages/react/src/components/SpinWheel/index.tsx`~~ released 09:55              | ~~S (F4-c)~~        | TASK-013 (S-done)           | 2026-05-22 09:35–09:55 |
+| ~~`packages/react/test/components/SpinWheel.test.tsx`~~ released 09:55              | ~~S (F4-c)~~        | TASK-013 (S-done)           | 2026-05-22 09:35–09:55 |
+| ~~`workers/api/src/services/ingest.ts`~~ released 10:05                             | ~~E (F4-b)~~        | TASK-013 (E-done)           | 2026-05-22 09:35–10:05 |
+| ~~`workers/api/test/events.route.test.ts`~~ released 10:05                          | ~~E (F4-b)~~        | TASK-013 (E-done)           | 2026-05-22 09:35–10:05 |
+| ~~`workers/api/migrations/0005_fix_deep_diver_rule.sql`~~ (new) released 09:55      | ~~M (F4-a)~~        | TASK-013 (M-done)           | 2026-05-22 09:35–09:55 |
+| ~~`workers/api/src/rules/evaluator.test.ts`~~ (extended, +5 tests) released 09:55   | ~~M (F4-a)~~        | TASK-013 (M-done)           | 2026-05-22 09:40–09:55 |
+| ~~`apps/demo/src/routes/minigames.tsx`~~ released 2026-05-22 11:15                  | ~~A (F5-a)~~        | TASK-014 (A-done)           | 2026-05-22 11:00–11:15 |
+| ~~`apps/demo/src/routes/streaming.tsx`~~ released 2026-05-22 11:30                  | ~~C (F5-c)~~        | TASK-014 (C-done)           | 2026-05-22 11:20–11:30 |
+| ~~`apps/demo/e2e/claim-flow.spec.ts`~~ released 2026-05-22 11:30                    | ~~C (F5-c)~~        | TASK-014 (C-done)           | 2026-05-22 11:20–11:30 |
+| ~~`apps/demo/src/components/Layout.tsx`~~ released 2026-05-22 11:35                 | ~~B (F5-b)~~        | TASK-014 (B-done)           | 2026-05-22 11:20–11:35 |
+| ~~`apps/demo/src/components/Layout.test.tsx`~~ released 2026-05-22 11:35            | ~~B (F5-b)~~        | TASK-014 (B-done)           | 2026-05-22 11:20–11:35 |
+| ~~`packages/react/src/components/ScratchCard/index.tsx`~~ released 2026-05-22 12:25 | ~~SC (F6 hotfix)~~  | TASK-015 (SC-done)          | 2026-05-22 12:05–12:25 |
+| ~~`packages/react/test/components/ScratchCard.test.tsx`~~ released 2026-05-22 12:25 | ~~SC (F6 hotfix)~~  | TASK-015 (SC-done)          | 2026-05-22 12:05–12:25 |
+| ~~`apps/demo/src/routes/minigames.tsx`~~ released 2026-05-22 12:25                  | ~~SC (F6 hotfix)~~  | TASK-015 (SC-done)          | 2026-05-22 12:05–12:25 |

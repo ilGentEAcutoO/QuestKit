@@ -212,7 +212,18 @@ export function MiniGamesRoute(): ReactElement {
           <ScratchCard
             overlayLabel="Scratch to win"
             prize={
-              <div className="flex h-full w-full flex-col items-center justify-center gap-1 p-2 text-center">
+              <div
+                className="flex h-full w-full flex-col items-center justify-center gap-1 p-2 text-center"
+                // F6 / v0.1.14: extra consumer-level defence against
+                // text-selection / image-drag leaking into the scratch
+                // gesture. The ScratchCard component already sets
+                // user-select:none + preventDefault on the canvas + its
+                // own prize wrapper, but a Tailwind utility on this
+                // child would override the inline style if added later
+                // — pinning it here makes the contract explicit at the
+                // demo-route level.
+                style={{ userSelect: "none" }}
+              >
                 <span aria-hidden="true" className="text-4xl">
                   🎁
                 </span>
