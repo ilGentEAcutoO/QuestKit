@@ -1,6 +1,21 @@
 <h1 align="center">QuestKit</h1>
 
 <p align="center">
+  <a href="https://questkit.jairukchan.com"><img alt="▶ Try the Live Demo" src="https://img.shields.io/badge/%E2%96%B6_Try_the_Live_Demo-questkit.jairukchan.com-6366f1?style=for-the-badge&logoColor=white"></a>
+</p>
+
+<p align="center">
+  <img alt="QuestKit demo — e-commerce, missions, claim, mini-games across the four scenarios" src="docs/media/demo.gif" width="720">
+</p>
+
+<p align="center">
+  <a href="https://questkit.jairukchan.com"><strong>Live Demo</strong></a> ·
+  <a href="https://docs.questkit.jairukchan.com">Documentation</a> ·
+  <a href="https://play.questkit.jairukchan.com">Embed Playground</a> ·
+  <a href="docs/SELF_HOSTING.md">Self-Hosting Guide</a>
+</p>
+
+<p align="center">
   <em>An embeddable gamification SDK, fully built on Cloudflare's developer platform.</em><br/>
   Missions, rewards, campaigns, and AI-powered recommendations in a single drop-in script.
 </p>
@@ -13,20 +28,6 @@
   <a href="./packages/embed"><img alt="Embed bundle size" src="https://img.shields.io/badge/embed-59%20KB%20gzip-success?logo=javascript&logoColor=white"></a>
   <a href="https://workers.cloudflare.com/"><img alt="Powered by Cloudflare" src="https://img.shields.io/badge/Powered%20by-Cloudflare-F38020?logo=cloudflare&logoColor=white"></a>
 </p>
-
-<p align="center">
-  <img alt="QuestKit demo — e-commerce, missions, claim, mini-games across the four scenarios" src="docs/media/demo.gif" width="720">
-</p>
-
-<p align="center">
-  <a href="https://questkit.jairukchan.com">Live Demo</a> ·
-  <a href="https://docs.questkit.jairukchan.com">Documentation</a> ·
-  <a href="https://play.questkit.jairukchan.com">Embed Playground</a> ·
-  <a href="docs/SELF_HOSTING.md">Self-Hosting Guide</a>
-</p>
-
-> 🚧 **v0.1.0-rc** — Phases 1–5 shipped; Phase 6 (deploy + polish) in progress.
-> Public URLs above go live after [TASK-030](./instruction/work/todos.md#task-030).
 
 ---
 

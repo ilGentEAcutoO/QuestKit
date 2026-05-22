@@ -117,14 +117,15 @@ const config: Config = {
     prism: {
       theme: prismThemes.github,
       darkTheme: prismThemes.dracula,
-      additionalLanguages: [
-        "bash",
-        "json",
-        "jsonc",
-        "typescript",
-        "tsx",
-        "jsx",
-      ],
+      // NOTE (F9-a / v0.1.17): "jsonc" was in this list but Prism doesn't
+      // ship a `prism-jsonc` language module — Docusaurus tried to load it
+      // at runtime, the dynamic require threw, the whole JS bundle crashed,
+      // and the docs site rendered as raw unstyled markup (no CSS, no
+      // hydration). Removed jsonc; ```jsonc code blocks degrade to plain
+      // text. If/when JSONC highlighting is needed, add a custom Prism
+      // plugin that aliases jsonc to json + a comment grammar — don't
+      // add jsonc back to this list without verifying the module exists.
+      additionalLanguages: ["bash", "json", "typescript", "tsx", "jsx"],
     },
   } satisfies Preset.ThemeConfig,
 };

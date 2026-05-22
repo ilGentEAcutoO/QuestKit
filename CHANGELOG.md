@@ -5,6 +5,53 @@ All notable changes to QuestKit are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.17] — 2026-05-22 — F9 (docs site CSS fix + README Demo CTA)
+
+User report: `https://docs.questkit.jairukchan.com/docs/` UI "เละเทะมาก"
+(completely unstyled raw markup — 1996-era HTML look). Root cause:
+`apps/docs/docusaurus.config.ts` had `"jsonc"` in `additionalLanguages`
+but Prism doesn't ship a `prism-jsonc` language module. Docusaurus's
+runtime dynamic require threw `Cannot find module './prism-jsonc'`,
+the JS bundle initialization crashed, CSS injection never ran, React
+never hydrated → page rendered as pure unstyled HTML. Footer dark
+theme rendered because that's static CSS, but everything else was
+broken.
+
+Also: README.md had the Demo link buried in the middle of the link
+row. User wanted it surfaced as the first prominent CTA.
+
+### Fixed
+
+- **`apps/docs/docusaurus.config.ts` — removed `"jsonc"` from
+  `additionalLanguages` (F9-a).** ```jsonc code blocks now degrade
+  to plain text (no syntax highlighting). If JSONC highlighting is
+  needed later, add a custom Prism plugin that aliases jsonc to
+  json + a comment grammar — don't add jsonc back to this list
+  without verifying the module exists. Added a defensive comment at
+  the site explaining the crash chain so future maintainers don't
+  re-introduce it.
+- **`README.md` — Demo now leads (F9-b).** Restructured top of file:
+  big ▶ Try the Live Demo badge button → GIF → quick links row →
+  tagline → CI/quality badges. Was: title → tagline → badges →
+  GIF → tiny "Live Demo" link buried in a row of 4 links → status
+  note. Now the Demo is the FIRST clickable element, sized for
+  visual weight.
+
+### Verification
+
+- `pnpm typecheck` 14/14 packages clean
+- `pnpm lint` 10/10 packages clean
+- `pnpm test` 11/11 packages, 0 failures (no test changes — fixes
+  are config + Markdown only)
+- Lead release pipeline pending docs site re-verify (load
+  https://docs.questkit.jairukchan.com/docs/ → confirm CSS loaded
+  - no `Cannot find module './prism-jsonc'` console error)
+
+### Cross-references
+
+- TASK-018 in `instruction/work/todos.md`
+- Continues from v0.1.16 (commit `99027cb`)
+
 ## [0.1.16] — 2026-05-22 — F8-a (DOCUMENTARY pill for discoverability)
 
 User report (post-v0.1.15): clicked Watch on /streaming videos, but
