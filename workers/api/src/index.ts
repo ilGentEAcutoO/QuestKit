@@ -58,7 +58,7 @@ app.use(
 app.get("/v1/health", (c) => {
   return c.json({
     ok: true,
-    version: "0.1.19",
+    version: "0.1.20",
     commit: c.env.GIT_SHA ?? "dev",
   });
 });

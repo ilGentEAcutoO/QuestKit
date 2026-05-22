@@ -5,6 +5,63 @@ All notable changes to QuestKit are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.20] — 2026-05-22 — F12 (root cause — react theme.css transitive Tailwind import)
+
+v0.1.17 → v0.1.18 → v0.1.19 were three CONSECUTIVE attempts to fix
+the docs site layout, and ALL THREE failed. CSS hash changed each
+time (proving the build was rebuilt + deployed), but the sidebar
+stayed at 1905px display:block and the layout stayed a single tall
+column.
+
+The reason all three docs-side fixes failed: **`packages/react/src/styles/theme.css:23`
+had `@import 'tailwindcss';`** (the bulk form, includes preflight),
+and `apps/docs/src/css/custom.css:22` imported `@questkit/react/styles.css`.
+So no matter what we did in custom.css, the transitive import from
+the theme package pulled the full Tailwind back in, preflight and
+all. The docs's selective import was undone two layers deep in the
+CSS dependency graph.
+
+### Fixed
+
+- **`packages/react/src/styles/theme.css` — use selective imports
+  (F12).** Was: `@import 'tailwindcss';` (bulk = preflight + theme
+  - utilities). Now: `@import 'tailwindcss/theme' layer(theme);` +
+    `@import 'tailwindcss/utilities' layer(utilities);` — same
+    pattern as v0.1.19 docs custom.css. Drops the destructive
+    preflight (`* { margin: 0; padding: 0 }`) that was clobbering
+    downstream consumers' layouts. Added a docblock paragraph
+    explaining the v0.1.17–v0.1.20 incident so future maintainers
+    don't re-introduce the bulk import.
+- Demo unaffected: `apps/demo/src/styles.css:9` has its OWN
+  `@import 'tailwindcss';` so it still gets preflight independently.
+- Embed: `packages/embed/src/styles.ts` already had a comment
+  acknowledging this concern — no change needed.
+
+### Verification
+
+- `@questkit/react`: 156 tests pass (no test changes)
+- `@questkit/demo`: 14 tests pass (unaffected, has own Tailwind import)
+- Typecheck + lint clean
+- Pending docs prod re-verify (load
+  https://docs.questkit.jairukchan.com/docs/ → confirm sidebar
+  narrow + main wide 2-column layout)
+
+### The 3-iteration lesson
+
+Each docs-side fix worked on its own merits but was rendered moot by
+the transitive import. The lesson: **when a CSS issue persists across
+"fixes" but the bundle hash IS changing**, look upstream in the
+import graph, not at the surface-level import. The docs site
+imported a styles.css from a package that itself imported the
+problematic style. Subtle.
+
+### Cross-references
+
+- TASK-020 in `instruction/work/todos.md`
+- Continues from v0.1.19 (commit `267ee3e`)
+- F9 / F10 / F11 / F12 are all attempts to fix the SAME user
+  report ("docs site UI เละเทะมาก"); F12 is the actual root cause.
+
 ## [0.1.19] — 2026-05-22 — F11 (docs layout — skip Tailwind preflight)
 
 v0.1.18 dropped the `important` flag from the Tailwind import but the

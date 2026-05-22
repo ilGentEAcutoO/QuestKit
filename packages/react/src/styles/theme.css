@@ -20,7 +20,23 @@
  * Tokens populated in TASK-014. The values below are PLACEHOLDERS — the
  * real palette is a design decision recorded as ADR-006 (Phase 6).
  */
-@import 'tailwindcss';
+/*
+ * IMPORTANT (F12 / v0.1.20): use selective imports (theme + utilities only),
+ * NOT the bulk `@import 'tailwindcss';`. The bulk form includes preflight,
+ * which is a destructive `* { margin: 0; padding: 0; box-sizing: border-box }`
+ * reset that clobbers downstream consumers' layout. The docs site (Docusaurus
+ * + Infima) silently broke for 3 hotfix iterations (v0.1.17 → v0.1.18 →
+ * v0.1.19) because the docs's selective import was undone by THIS file
+ * transitively re-importing the bulk version. Each downstream consumer
+ * should opt into preflight themselves if they want it (e.g., the demo
+ * does via apps/demo/src/styles.css:9 `@import 'tailwindcss';`).
+ *
+ * The `@theme` block below requires only the theme layer to register
+ * tokens; `@import 'tailwindcss/utilities'` keeps the utility classes
+ * (bg-qk-primary, text-qk-coin, etc.) auto-generated from those tokens.
+ */
+@import 'tailwindcss/theme' layer(theme);
+@import 'tailwindcss/utilities' layer(utilities);
 
 @theme {
   /* ===== Brand palette (TASK-014: user-supplied) =====
