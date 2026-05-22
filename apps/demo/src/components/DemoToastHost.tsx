@@ -13,6 +13,26 @@
  * as the local imperative API. Callers in routes/* use the demo hook;
  * library widgets that use `useRewardClaimToast` directly would still
  * fall through the @questkit/react singleton but no demo route does so.
+ *
+ * Three toast variants (`DemoToastInput`):
+ *   1. `Reward` — actual badge / currency / item grant. Warm gold chip
+ *      with `BadgeIcon`/`CoinIcon`/`GiftIcon` glyph. Fired by
+ *      `useMissionClaim` on a 200 OK claim.
+ *   2. `DemoToastError` — non-success claim outcomes (F1 hotfix v0.1.9:
+ *      the 409 `claim_not_ready` round-trip during a multi-session
+ *      resume). Red-tinged chip with warning circle glyph.
+ *   3. `DemoToastProgress` — per-spin / per-scratch progress nudge added
+ *      in v0.1.15 (F7-a hotfix). The previous wiring fired a
+ *      `{kind:"badge", badgeId:"lucky_spinner"}` toast on EVERY spin of
+ *      the wheel and EVERY scratch reveal — DemoToastHost rendered that
+ *      as "Badge: lucky_spinner" with the BadgeIcon, visually identical
+ *      to the actual badge-grant toast that fires on successful claim.
+ *      Users saw "Badge: …" after a single spin and concluded the badge
+ *      had already been granted, when in fact no badge lands until the
+ *      mission target is hit AND the user clicks Claim. The progress
+ *      variant uses a neutral grey-blue chip with a distinct "+1" glyph
+ *      and copy like "+1 toward Lucky Spinner badge" to make it obvious
+ *      that the toast is a PROGRESS nudge, not a badge grant.
  */
 import type { Reward } from "@questkit/types";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
@@ -43,7 +63,27 @@ export interface DemoToastError {
   description?: string;
 }
 
-export type DemoToastInput = Reward | DemoToastError;
+/**
+ * Progress nudge payload — fired per spin/scratch BEFORE the mission is
+ * actually completable (F7-a hotfix v0.1.15). `missionId` is the server
+ * mission this nudge is advancing (used for diagnostics / future
+ * filtering — not rendered directly). `label` is the human name of the
+ * eventual reward (e.g. "Lucky Spinner badge") and is interpolated into
+ * the user-facing copy ("+1 toward Lucky Spinner badge").
+ *
+ * Distinguish carefully from the `kind:"badge"` reward variant: that
+ * fires on a successful CLAIM and means the badge has actually been
+ * granted. This `progress` variant fires on every minigame interaction
+ * BEFORE claim and just means the user has ticked one event toward the
+ * mission's count.
+ */
+export interface DemoToastProgress {
+  kind: "progress";
+  missionId: string;
+  label: string;
+}
+
+export type DemoToastInput = Reward | DemoToastError | DemoToastProgress;
 
 interface ToastItem {
   id: number;
@@ -60,8 +100,13 @@ function isErrorToast(input: DemoToastInput): input is DemoToastError {
   return input.kind === "error";
 }
 
+function isProgressToast(input: DemoToastInput): input is DemoToastProgress {
+  return input.kind === "progress";
+}
+
 function toastLabel(input: DemoToastInput): string {
   if (isErrorToast(input)) return input.title;
+  if (isProgressToast(input)) return `+1 toward ${input.label}`;
   if (input.kind === "currency") {
     return `+${input.amount} ${input.currency}`;
   }
@@ -92,6 +137,29 @@ function ToastIcon({ input }: { input: DemoToastInput }): ReactElement {
         <circle cx="12" cy="12" r="10" />
         <line x1="12" y1="8" x2="12" y2="12" />
         <line x1="12" y1="16" x2="12.01" y2="16" />
+      </svg>
+    );
+  }
+  if (isProgressToast(input)) {
+    // "Plus inside circle" glyph — deliberately NOT the BadgeIcon so the
+    // user can't confuse a progress nudge with the celebratory badge
+    // grant. Stroke uses currentColor so the grey-blue progress surface
+    // (set below) drives it.
+    return (
+      <svg
+        width={24}
+        height={24}
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <circle cx="12" cy="12" r="10" />
+        <line x1="12" y1="8" x2="12" y2="16" />
+        <line x1="8" y1="12" x2="16" y2="12" />
       </svg>
     );
   }
@@ -184,10 +252,21 @@ export function DemoToastProvider({
                               border: "1px solid oklch(0.75 0.13 30)",
                               color: "oklch(0.50 0.18 30)",
                             }
-                          : {
-                              background: "oklch(0.96 0.01 95)",
-                              border: "1px solid oklch(0.85 0.04 90)",
-                            }
+                          : isProgressToast(item.input)
+                            ? {
+                                // Neutral grey-blue chip — deliberately
+                                // distinct from the warm-gold reward chip
+                                // so the user reads this as "in progress"
+                                // not "completed". Tone matches the
+                                // existing demo-muted colour family.
+                                background: "oklch(0.95 0.02 240)",
+                                border: "1px solid oklch(0.80 0.05 240)",
+                                color: "oklch(0.40 0.10 240)",
+                              }
+                            : {
+                                background: "oklch(0.96 0.01 95)",
+                                border: "1px solid oklch(0.85 0.04 90)",
+                              }
                       }
                     >
                       <ToastIcon input={item.input} />
@@ -207,7 +286,9 @@ export function DemoToastProvider({
                       aria-label={
                         isErrorToast(item.input)
                           ? "Dismiss notice"
-                          : "Dismiss reward"
+                          : isProgressToast(item.input)
+                            ? "Dismiss progress notice"
+                            : "Dismiss reward"
                       }
                       className="grid h-7 w-7 place-items-center rounded-md text-base transition-colors hover:bg-[color:var(--color-demo-surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[color:var(--color-qk-primary)]"
                       style={{ color: "var(--color-qk-fg)" }}

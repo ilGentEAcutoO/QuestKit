@@ -1,5 +1,5 @@
 /**
- * Streaming scenario — 6 video tiles, "Watch" fires video.watched.
+ * Streaming scenario — 7 video tiles, "Watch" fires video.watched.
  *
  * Aligned with the seed missions in 0002:
  *   - Daily Watcher (daily, count 1)
@@ -13,6 +13,14 @@
  * always agrees with the MissionCard further down, and crucially it
  * reflects the `status: "claimed"` flip after the user claims — the bug
  * B3/D1 fix from Phase 9 / TASK-002.
+ *
+ * Library size (F7-b / TASK-016 — v0.1.15): the library carries THREE
+ * documentaries (Planet Earth III, Blue Worlds, Arctic Tales) so the
+ * Curious Mind mission (count 3) is reachable via three UNIQUE clicks.
+ * Prior to v0.1.15 the library only had two documentaries, which forced
+ * a user to either re-click one documentary or click any video twice to
+ * reach 3/3 — confusing UX since the mission is "watch 3 documentaries"
+ * and the natural reading is "three different documentaries."
  */
 import { MissionCard, useEvent, useMissions } from "@questkit/react";
 
@@ -73,6 +81,18 @@ const VIDEOS: Video[] = [
     genre: "documentary",
     durationSec: 4200,
     emoji: "🐋",
+  },
+  // F7-b / v0.1.15: third documentary so Curious Mind (count 3) is
+  // reachable with 3 unique clicks. Prior to v0.1.15 the library had
+  // only Planet Earth III + Blue Worlds, forcing users to either
+  // re-click one documentary or click any other video twice — confusing
+  // because the mission reads as "watch 3 different documentaries."
+  {
+    id: "v_doc_arctic",
+    title: "Arctic Tales",
+    genre: "documentary",
+    durationSec: 2400,
+    emoji: "🐻‍❄️",
   },
 ];
 

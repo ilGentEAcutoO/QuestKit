@@ -56,7 +56,10 @@ test.describe("Streaming — Watch + button latency", () => {
     // in the SDK. We click 4 different videos in quick succession; none
     // of them should leave the "Logging…" label visible after 3 s.
     const watchButtons = page.getByRole("button", { name: /^Watch /i });
-    await expect(watchButtons).toHaveCount(6, { timeout: 8_000 });
+    // Library carries 7 videos as of v0.1.15 (3 docs + drama + action +
+    // comedy + sport) — F7-b added a third documentary so Curious Mind
+    // is reachable with 3 unique clicks.
+    await expect(watchButtons).toHaveCount(7, { timeout: 8_000 });
 
     // Click 4 distinct videos.
     for (let i = 0; i < 4; i++) {
@@ -92,7 +95,9 @@ test.describe("Streaming — Watch + button latency", () => {
     await page.goto("/streaming");
 
     const watchButtons = page.getByRole("button", { name: /^Watch /i });
-    await expect(watchButtons).toHaveCount(6, { timeout: 8_000 });
+    // Library carries 7 videos as of v0.1.15 (F7-b added a 3rd
+    // documentary). See peer test above for the rationale.
+    await expect(watchButtons).toHaveCount(7, { timeout: 8_000 });
 
     // Click each of the first 4 videos. We track that the same number
     // of POST /v1/events requests fired by waiting for each network

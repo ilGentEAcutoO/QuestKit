@@ -5,6 +5,53 @@ All notable changes to QuestKit are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.15] — 2026-05-22 — F7 batch (honest per-spin toast + 3rd documentary)
+
+User report (post-v0.1.14): per-spin/scratch toast text said
+"Badge: lucky_spinner" / "Badge: scratch_master" but no badge was
+actually granted until the user reached the mission target + clicked
+Claim. Misleading copy. Also: Library has only 2 unique documentaries
+(`v_doc_planet`, `v_doc_oceans`) but Curious Mind needs 3 documentary
+watches — unreachable with unique clicks.
+
+### Fixed
+
+- **`apps/demo/src/components/DemoToastHost.tsx` — new
+  `kind:"progress"` toast variant (F7-a).** `DemoToastInput =
+Reward | DemoToastError | DemoToastProgress` where
+  `DemoToastProgress = {kind:"progress", missionId, label}`. Renders
+  with a distinct icon + neutral chip styling (not the warm gold of
+  the badge variant) so users can tell at a glance that progress
+  was recorded vs an actual badge being granted.
+- **`apps/demo/src/routes/minigames.tsx` SpinWheel onSpin + ScratchCard
+  onReveal now fire `kind:"progress"` toasts (F7-a).** Replaces the
+  prior `showToast({kind:"badge", badgeId:"lucky_spinner|scratch_master"})`
+  which visually mimicked the actual claim-success badge toast. The
+  fireEvent payload is unchanged — server-side mission still
+  increments correctly. The actual badge-grant toast still fires
+  from `useMissionClaim` on claim success — that's correct and
+  unchanged.
+- **`apps/demo/src/routes/streaming.tsx` Library now has 3 unique
+  documentaries (F7-b).** Added a third documentary entry so
+  Curious Mind (target 3 documentary watches) is reachable with 3
+  unique clicks rather than requiring the user to repeat a video.
+  Updated `apps/demo/e2e/streaming.spec.ts` to reflect the new
+  Library count.
+
+### Verification
+
+- `pnpm typecheck` 14/14 packages clean
+- `pnpm lint` 10/10 packages clean
+- `pnpm test` 500+ tests, 0 failures:
+  - `@questkit/demo`: 14 tests (was 11, +3 from F7-a DemoToastHost
+    progress variant specs)
+  - other packages unchanged
+
+### Cross-references
+
+- TASK-016 in `instruction/work/todos.md` for full evidence
+- Continues from v0.1.14 (commit `82caa93`)
+
 ## [0.1.14] — 2026-05-22 — F6 fix (ScratchCard preventDefault + no-select)
 
 User report (post-v0.1.13 thorough test): "scratch card ก็ scratch ไม่ได้

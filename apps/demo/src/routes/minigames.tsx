@@ -25,6 +25,22 @@
  *   Slice labels stay visually varied so the wheel still feels like a
  *   wheel; the rewards under the hood are all `lucky_spinner` badge.
  *
+ * Per-spin toast variant (F7-a / TASK-016 — v0.1.15):
+ *   Despite the badge-shaped reward above being semantically honest
+ *   ("we are advancing the lucky_spinner badge mission"), DemoToastHost
+ *   rendered every spin / scratch as "Badge: lucky_spinner" with the
+ *   BadgeIcon — visually identical to the actual badge GRANT toast that
+ *   fires on a successful claim. Users saw "Badge: …" after a single
+ *   spin and thought the badge had landed, then concluded the system
+ *   was broken when no badge appeared on the BadgeWall. The wiring
+ *   below now fires a `kind:"progress"` toast (defined in
+ *   `apps/demo/src/components/DemoToastHost.tsx`) which renders as
+ *   "+1 toward Lucky Spinner badge" with a neutral grey-blue chip and a
+ *   distinct "+1" glyph — visually distinct from the warm-gold
+ *   celebratory chip that the actual claim grants. The `reward` value
+ *   itself is still forwarded into the `fireEvent` payload unchanged so
+ *   server-side mission progress continues to advance.
+ *
  * In-place mission cards (F5-a / TASK-014 — v0.1.13):
  *   Production inspection of v0.1.12 surfaced a UX gap: spinning /
  *   scratching ticked server-side mission progress correctly and the
@@ -167,7 +183,18 @@ export function MiniGamesRoute(): ReactElement {
             onSpin={(reward) => {
               const slice = WHEEL_SLICES.find((s) => s.reward === reward);
               setLastWheelLabel(slice?.label ?? "Reward");
-              showToast(reward);
+              // F7-a hotfix v0.1.15: fire a `progress` toast (NOT the
+              // raw `reward` which would render as "Badge:
+              // lucky_spinner" and be mistaken for an actual badge
+              // grant). The progress variant copy + neutral chip make
+              // it obvious the badge hasn't landed yet — it's still
+              // accruing until the user reaches the claim threshold and
+              // clicks Claim on the in-place mission card below.
+              showToast({
+                kind: "progress",
+                missionId: "mis_lucky_spinner",
+                label: "Lucky Spinner badge",
+              });
               // Fire a synthetic event so the EventLog drawer reflects
               // the spin in the same live-update timeline as ecommerce
               // purchases and daily check-ins. This event matches
@@ -176,6 +203,10 @@ export function MiniGamesRoute(): ReactElement {
               // 5th completes the mission. No currency is minted by
               // this event — coin mints only happen on the claim
               // endpoint when the mission's reward is currency-kind.
+              // NB: the `reward` shape is still the badge-kind reward
+              // — it's forwarded unchanged into the payload so the
+              // server-side rule engine and AE downstream pipeline see
+              // the same data as before. Only the toast UX changed.
               void fireEvent({
                 name: "qk.minigame.spin",
                 payload: {
@@ -237,10 +268,21 @@ export function MiniGamesRoute(): ReactElement {
             }
             onReveal={() => {
               setScratchRevealed(true);
-              // Honest reward shape — matches `mis_scratch_master` from
-              // migration 0004. Coin minting is NOT triggered by event
-              // ingest; see file-level comment for the contract.
-              showToast({ kind: "badge", badgeId: "scratch_master" });
+              // F7-a hotfix v0.1.15: fire a `progress` toast (NOT the
+              // raw badge reward which would have rendered as "Badge:
+              // scratch_master" and been mistaken for an actual badge
+              // grant). The progress variant makes it clear the badge
+              // hasn't landed — it accrues until the mission target is
+              // hit and the user clicks Claim on the in-place card
+              // below. The mission itself + its reward shape are
+              // unchanged (`mis_scratch_master` from migration 0004).
+              // Coin minting is NOT triggered by event ingest; see
+              // file-level comment for the contract.
+              showToast({
+                kind: "progress",
+                missionId: "mis_scratch_master",
+                label: "Scratch Master badge",
+              });
               void fireEvent({
                 name: "qk.minigame.scratch",
                 payload: { game: "scratch_card" },
