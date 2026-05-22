@@ -1,6 +1,6 @@
 # QuestKit — Active Tasks
 
-> Last updated: 2026-05-22 12:35 (TASK-015 v0.1.14 shipped as `82caa93` — F6 ScratchCard preventDefault + userSelect:none prod-verified via Playwright `?user=v014_verify` (both canvas + prize wrapper carry userSelect:none, footer reads v0.1.14); **awaiting user confirmation to /workflow-end archive Phase 9**)
+> Last updated: 2026-05-22 12:55 (TASK-017 v0.1.16 sub-agent P complete — F8-a documentary pill added to 3 doc cards in /streaming Library; teal "📺 DOCUMENTARY" pill makes the "Documentaries today" counter discoverable so users stop clicking drama/comedy/sport expecting it to tick; demo test 14/14, typecheck clean, lint clean; awaiting Lead release pipeline + prod verify)
 
 ## RESUME CONTEXT (v0.1.9 hotfix mid-flight)
 
@@ -638,6 +638,30 @@ If next session asks "มีงานค้างไหม":
 - **Progress Notes:**
   - 2026-05-22 12:25 - Sub-agent SC complete. Diagnosis confirmed against source: `handlePointerDown` (L230-252 pre-fix) and `handlePointerMove` (L254-261 pre-fix) had no `e.preventDefault()` — only `handleKeyDown` did, on the Space-key branch. Fix applied as first line in both handlers (`preventDefault` precedes the `revealedRef.current` / `scratchingRef.current` early-returns so re-clicks on a revealed card still suppress native selection). `userSelect: "none"` added to canvas inline style + `.qk-scratchcard__prize` wrapper + scratch prize wrapper in `apps/demo/src/routes/minigames.tsx`. No vendor prefixes added — repo grep on `WebkitUserSelect|MozUserSelect` showed zero existing usage; the modern unprefixed `user-select` covers all evergreen browsers we target. 4 new regression specs added: synthesised native `Event` with `cancelable:true` dispatched on the canvas, then asserted `evt.defaultPrevented === true` after the handler runs (React forwards `preventDefault` from the synthetic event through to the underlying native event). Test scenarios cover: (a) the active-scratch pointerdown case, (b) pointermove when no scratch is in flight (early-return path still suppresses default), (c) the user-confusion case of re-clicking an already-revealed card (preventDefault must run BEFORE the revealedRef early-return — that's the contract the test pins). Gates all GREEN; locks released. Hands off to Lead for version bump + CHANGELOG + release pipeline.
 
+### Task: [TASK-017] v0.1.16 hotfix — F8-a documentary pill (discoverability)
+
+- **Status:** 🔵 in-progress (sub-agent P done; awaiting Lead release pipeline)
+- **Priority:** P1 (UX discoverability — users still click drama/comedy/sport expecting the "Documentaries today" counter to advance)
+- **Parallel:** no (single self-contained route fix)
+- **Assigned:** Lead (Opus 4.7) + sub-agent P (Opus 4.7)
+- **Depends on:** TASK-015 (v0.1.14 shipped) + the F7-b "third documentary" + F5-c "Documentaries today" widget retitle (both already on main as of v0.1.15)
+- **Covers:** F8-a — discoverability gap; "documentary · 55 min" subtext is too subtle, users don't realise WHICH videos advance Curious Mind
+- **Root cause:** post-F5-c the widget heading reads "Documentaries today" and post-F7-b the library has 3 doc tiles, but the genre indicator at the card level (`{video.genre} · {duration} min` muted-grey subtext) does not visually call out the counter-eligible videos. Users click any tile and are confused when the counter doesn't tick.
+- **Files (sub-agent P):**
+  - `apps/demo/src/routes/streaming.tsx` — conditional "📺 DOCUMENTARY" pill rendered next to `<h4>` title for `video.genre === "documentary"`. ~11 LOC including the conditional wrapper-div restructure (title + pill share a `flex flex-wrap items-center gap-2` row). Pill style: `oklch(0.55 0.12 220)` teal-blue background + white bold uppercase tracking-wide text, `text-[0.65rem]` size, rounded-pill. Visible text is the accessibility surface (`📺` is `aria-hidden`). Genre subtext kept verbatim — pill is ADDITIONAL emphasis, not replacement. Docblock extended with F8-a / v0.1.16 sub-paragraph.
+  - `apps/demo/e2e/streaming.spec.ts` — UNCHANGED. Existing assertions (`toHaveCount(7)`, `Watch <title>` aria-label regex, `^[1-3]/3$` counter regex) don't touch the genre subtext / card body shape, so adding the pill is invisible to the suite.
+- **Subtasks:**
+  - [x] P: add conditional pill JSX next to `<h4>` title
+  - [x] P: docblock note (F8-a / v0.1.16)
+  - [x] P: confirm e2e suite makes no genre-card HTML shape assertions → no test changes
+  - [x] P: gates — demo test 14/14 GREEN (4 suites unchanged: DemoToastHost, client, useMissionClaim, Layout), typecheck GREEN, lint GREEN (modulo pre-existing Node MODULE_TYPELESS_PACKAGE_JSON warning)
+  - [ ] verify (Lead): root gates GREEN
+  - [ ] bump (Lead): version → 0.1.16 + CHANGELOG
+  - [ ] commit + push + prod verify (Lead) — Playwright check that the 3 doc cards render the teal pill and that drama/comedy/sport/action cards do NOT
+- **Progress Notes:**
+  - 2026-05-22 12:50 - TASK-017 created. Sub-agent P dispatched.
+  - 2026-05-22 12:55 - Sub-agent P complete. PILL DESIGN: teal `oklch(0.55 0.12 220)` background + white bold uppercase "📺 DOCUMENTARY" tracking-wide, `text-[0.65rem]`, pill-rounded; renders only on `video.genre === "documentary"` so v_doc_planet / v_doc_oceans / v_doc_arctic show it and v_drama_succession / v_action_dunes / v_comedy_lateshow / v_sport_match do not. Color chosen deliberately distinct from indigo `--color-qk-primary` (CTA buttons), amber `--color-qk-coin` (badge rewards), and red (errors). Visible text is the a11y surface (no aria-label needed; 📺 emoji is `aria-hidden`). Title + pill share a `flex flex-wrap items-center gap-2` wrapper so on narrow cards the pill wraps below the title rather than overflowing. ~11 LOC. Genre subtext "documentary · 55 min" preserved verbatim. Docblock extended (F8-a sub-paragraph). E2E suite reviewed — `streaming.spec.ts` only asserts `toHaveCount(7)`, `Watch <title>` aria-labels, and `^[1-3]/3$` counter regex; none touch the genre subtext or card-body shape so no test changes needed. Demo gates: test 14/14 in 4 suites GREEN, typecheck clean, lint clean. Locks released below.
+
 ## File Lock Registry
 
 | File                                                                                | Locked by           | Task                        | Since                  |
@@ -691,3 +715,4 @@ If next session asks "มีงานค้างไหม":
 | ~~`packages/react/src/components/ScratchCard/index.tsx`~~ released 2026-05-22 12:25 | ~~SC (F6 hotfix)~~  | TASK-015 (SC-done)          | 2026-05-22 12:05–12:25 |
 | ~~`packages/react/test/components/ScratchCard.test.tsx`~~ released 2026-05-22 12:25 | ~~SC (F6 hotfix)~~  | TASK-015 (SC-done)          | 2026-05-22 12:05–12:25 |
 | ~~`apps/demo/src/routes/minigames.tsx`~~ released 2026-05-22 12:25                  | ~~SC (F6 hotfix)~~  | TASK-015 (SC-done)          | 2026-05-22 12:05–12:25 |
+| ~~`apps/demo/src/routes/streaming.tsx`~~ released 2026-05-22 12:55                  | ~~P (F8-a pill)~~   | TASK-017 (P-done)           | 2026-05-22 12:50–12:55 |

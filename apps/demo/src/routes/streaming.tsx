@@ -21,6 +21,17 @@
  * a user to either re-click one documentary or click any video twice to
  * reach 3/3 — confusing UX since the mission is "watch 3 documentaries"
  * and the natural reading is "three different documentaries."
+ *
+ * Documentary pill (F8-a / TASK-017 — v0.1.16): each documentary video
+ * card now displays a visible "📺 DOCUMENTARY" pill next to the title.
+ * F5-c retitled the widget to "Documentaries today" and F7-b added a
+ * third doc, but users still couldn't tell at a glance WHICH videos in
+ * the Library advance the Curious Mind counter — the genre subtext
+ * ("documentary · 55 min") was too quiet. The pill makes the
+ * counter-advancing genre OBVIOUS at-the-card level so users stop
+ * clicking drama/comedy/sport expecting the counter to tick. The pill
+ * is teal/info-coloured to avoid colliding with the gold (badge reward)
+ * and red (error) palettes.
  */
 import { MissionCard, useEvent, useMissions } from "@questkit/react";
 
@@ -321,9 +332,20 @@ export function StreamingRoute(): ReactElement {
               </div>
               <div className="flex items-start justify-between gap-2">
                 <div className="flex-1">
-                  <h4 className="text-base font-semibold leading-snug">
-                    {video.title}
-                  </h4>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h4 className="text-base font-semibold leading-snug">
+                      {video.title}
+                    </h4>
+                    {video.genre === "documentary" ? (
+                      <span
+                        className="inline-flex items-center gap-1 rounded-[var(--radius-pill)] px-2 py-0.5 text-[0.65rem] font-bold uppercase tracking-wide text-white"
+                        style={{ background: "oklch(0.55 0.12 220)" }}
+                      >
+                        <span aria-hidden="true">📺</span>
+                        DOCUMENTARY
+                      </span>
+                    ) : null}
+                  </div>
                   <p
                     className="mt-0.5 text-xs"
                     style={{ color: "var(--color-demo-muted)" }}

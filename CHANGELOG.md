@@ -5,6 +5,47 @@ All notable changes to QuestKit are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.16] — 2026-05-22 — F8-a (DOCUMENTARY pill for discoverability)
+
+User report (post-v0.1.15): clicked Watch on /streaming videos, but
+"Documentaries today" widget stayed 0/3. Console log showed
+`mis_stream_longform_week` (Deep Diver) progressing — but no
+`mis_stream_documentary_3` events. Diagnosis: user clicked
+non-documentary videos (drama/action/comedy/sport). Curious Mind's
+server rule filter is `{genre: {eq: "documentary"}}` — only doc
+clicks count. Even after F5-c renamed widget to "Documentaries
+today" and F7-b added a 3rd doc (Arctic Tales), the genre subtext
+("documentary · 55 min") in each card was easy to miss and users
+kept clicking non-docs.
+
+### Fixed
+
+- **`apps/demo/src/routes/streaming.tsx` — added a "📺 DOCUMENTARY"
+  pill next to each documentary video title in the Library
+  (F8-a).** Teal background, white bold uppercase, tracking-wide —
+  visually distinct from indigo CTA buttons, amber coin rewards,
+  and red error states. Only renders when `video.genre ===
+"documentary"` (3 cards: Planet Earth III, Blue Worlds, Arctic
+  Tales). `flex-wrap` on the title-pill wrapper so on narrow
+  viewports the pill wraps below the title instead of overflowing
+  the card. Genre subtext kept verbatim (still useful context;
+  pill is additional emphasis). 📺 is `aria-hidden`; visible
+  "DOCUMENTARY" text is the a11y surface.
+
+### Verification
+
+- `pnpm typecheck` 14/14 packages clean
+- `pnpm lint` 10/10 packages clean
+- `pnpm test` 11/11 packages, 0 failures (demo 14/14 unchanged,
+  react 156/0 unchanged, worker-api 216/0/1-skip unchanged)
+- Pill purely visual — no behaviour or event change, so no new
+  test specs needed
+
+### Cross-references
+
+- TASK-017 in `instruction/work/todos.md`
+- Continues from v0.1.15 (commit `52ba1fe`)
+
 ## [0.1.15] — 2026-05-22 — F7 batch (honest per-spin toast + 3rd documentary)
 
 User report (post-v0.1.14): per-spin/scratch toast text said
