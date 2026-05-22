@@ -1,0 +1,42 @@
+-- Migration 0005 — F4-a fix: Deep Diver rule field-name mismatch.
+--
+-- Background:
+--   Migration 0002 seeded `mis_stream_longform_week` ("Deep Diver", count=10,
+--   weekly window) with this filter:
+--
+--     {"filter":{"durationMin":{"gte":20}}}
+--
+--   The demo's `video.watched` event payload uses field name `duration_sec`
+--   with values in seconds (e.g., 3300 for 55 min). The rule engine
+--   (`workers/api/src/rules/filter.ts :: matchesFilter`) looks up payload
+--   fields *literally* — there are no aliases and no case-insensitive matches.
+--   Result: every `video.watched` event missed the Deep Diver filter, leaving
+--   the mission stuck at 0/10 regardless of how many long-form videos the
+--   user watched.
+--
+--   Evidence (Playwright session 2026-05-22, fresh user `v011_investigate`):
+--     - 6 distinct video.watched events fired, all videos ≥ 20 min
+--     - Daily Watcher (no filter)      → 0 → 1 (correct)
+--     - Curious Mind (genre filter)    → 0 → 2 (correct, 2 docs in pool)
+--     - Deep Diver  (duration filter)  → 0 → 0 (BROKEN)
+--
+-- Fix (data-only, no code change):
+--   UPDATE the row's `criteria_json` to reference the actual payload field
+--   (`duration_sec`) with the threshold converted from minutes to seconds:
+--   20 min × 60 sec/min = 1200 sec.
+--
+--   New filter: {"duration_sec":{"gte":1200}}
+--
+--   The mission's eventName, count, window, and reward all stay identical;
+--   only the filter shape changes. The migration uses `UPDATE` (not
+--   INSERT OR REPLACE) so it is a no-op if the row was somehow removed,
+--   matching the conservative posture of the prior migrations.
+--
+-- Re-runnability:
+--   The UPDATE is idempotent — applying it twice produces the same row.
+--   `wrangler d1 migrations apply` records this filename in `d1_migrations`
+--   and skips it on subsequent runs in any case.
+
+UPDATE missions
+SET    criteria_json = '{"eventName":"video.watched","count":10,"window":"weekly","filter":{"duration_sec":{"gte":1200}}}'
+WHERE  id = 'mis_stream_longform_week';

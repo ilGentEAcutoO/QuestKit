@@ -723,6 +723,242 @@ describe("post /v1/events — TASK-003 minigame no-currency-mint contract (B5)",
   }, 15_000);
 });
 
+describe("post /v1/events — TASK-013 F4-b mission.completed dedup (terminal→terminal skip)", () => {
+  // Background — the rule engine intentionally keeps bumping `currentCount`
+  // on already-completed missions when subsequent qualifying events arrive
+  // (the row stays an accurate analytics tally). Prior to v0.1.12 the
+  // ingest pipeline broadcast a fresh `mission.completed` SDKUpdate on
+  // every one of those bumps, so a Daily Watcher (target=1) saw 6
+  // `mission.completed` events for 6 video clicks. The SDK consumer's
+  // celebration toast would fire 6x in principle (the demo clamps
+  // `Math.min(current, target)` so the visual was masked, but the wire
+  // traffic + DO writes were real waste — see the Playwright
+  // `?user=v011_investigate` console capture in TASK-013 brief).
+  //
+  // Fix (ingest.ts `tryBroadcastProgress`): capture the per-mission
+  // status BEFORE running the rule engine, then skip the SSE broadcast
+  // entirely when the prior status was already terminal
+  // ("completed"/"claimed") AND the post-evaluator status is also
+  // terminal. The D1 row still bumps; we just don't tell subscribers
+  // about a state change that didn't happen.
+  //
+  // These tests pin the contract end-to-end by attaching a live
+  // subscriber to the user's SSE_HUB DO (same pattern as
+  // missions.test.ts:204) and counting `mission.completed` frame
+  // appearances across two qualifying events.
+
+  it("does NOT re-fire mission.completed on a 2nd qualifying event for an already-completed Daily Watcher (target=1)", async () => {
+    const userId = `u_f4b_daily_watcher_${crypto.randomUUID()}`;
+    const { token } = await mintToken(userId);
+
+    // Register a live subscriber on the user's SSE hub BEFORE firing
+    // any event so the first broadcast (the genuine completion) also
+    // lands and we can compare frame counts before/after the 2nd event.
+    const stubId = env.SSE_HUB.idFromName(userId);
+    const stub = env.SSE_HUB.get(stubId);
+    const subRes = await stub.fetch("https://_/subscribe");
+    expect(subRes.status).toBe(200);
+
+    const reader = subRes.body!.getReader();
+    const decoder = new TextDecoder();
+    const frames: string[] = [];
+    void (async () => {
+      try {
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          if (value !== undefined) frames.push(decoder.decode(value));
+        }
+      } catch {
+        // cancellation is expected at teardown
+      }
+    })();
+
+    // Let the ": connected" sentinel land first.
+    await new Promise((r) => setTimeout(r, 20));
+
+    // First video.watched → Daily Watcher 0→1 (target=1) → genuine
+    // active→completed transition → MUST broadcast `mission.completed`.
+    const r1 = await postEvent(
+      {
+        userId,
+        name: "video.watched",
+        payload: { videoId: "v1", genre: "drama", duration_sec: 300 },
+        timestamp: Date.now(),
+      },
+      { token },
+    );
+    expect(r1.status).toBe(200);
+    const b1 = (await r1.json()) as { missionsUpdated: string[] };
+    expect(b1.missionsUpdated).toContain("mis_stream_daily_watch_1");
+
+    // Wait for the FIRST mission.completed to land in the subscriber.
+    const firstCompletedSeen = await Promise.race([
+      (async () => {
+        while (true) {
+          if (frames.join("").includes('"type":"mission.completed"')) {
+            return true;
+          }
+          await new Promise((r) => setTimeout(r, 25));
+        }
+      })(),
+      new Promise<false>((r) => setTimeout(() => r(false), 3000)),
+    ]);
+    expect(firstCompletedSeen).toBe(true);
+
+    // Snapshot the wire AFTER the first completion lands. The next
+    // event (which targets the SAME already-completed mission) must
+    // NOT add a second mission.completed frame.
+    const framesAfterFirst = frames.join("");
+    const completedCountAfterFirst = countOccurrences(
+      framesAfterFirst,
+      '"type":"mission.completed"',
+    );
+    expect(completedCountAfterFirst).toBe(1);
+
+    // Confirm the D1 row IS now in "completed" status (this is the
+    // precondition for the dedup behaviour — we're testing what
+    // happens when a qualifying event arrives for an already-terminal
+    // row).
+    const progressBefore = await env.DB.prepare(
+      "SELECT status, current_count FROM mission_progress WHERE user_id = ?1 AND mission_id = ?2",
+    )
+      .bind(userId, "mis_stream_daily_watch_1")
+      .first<{ status: string; current_count: number }>();
+    expect(progressBefore?.status).toBe("completed");
+    expect(progressBefore?.current_count).toBe(1);
+
+    // SECOND video.watched → Daily Watcher is already completed.
+    // Rule engine still matches + bumps currentCount → 2 (analytics
+    // tally stays honest) → row stays "completed". The broadcast
+    // layer MUST skip the SSE emit because terminal→terminal is a
+    // dedup-target transition.
+    const r2 = await postEvent(
+      {
+        userId,
+        name: "video.watched",
+        payload: { videoId: "v2", genre: "comedy", duration_sec: 300 },
+        timestamp: Date.now() + 1,
+      },
+      { token },
+    );
+    expect(r2.status).toBe(200);
+
+    // Give the broadcast pipeline a moment to settle. If there were a
+    // 2nd mission.completed on the wire, it would land within this
+    // window — we use the same generous 1s budget the missions
+    // SSE-delivery test uses for the negative-evidence assertion.
+    await new Promise((r) => setTimeout(r, 500));
+
+    const finalFrames = frames.join("");
+    const completedCountFinal = countOccurrences(
+      finalFrames,
+      '"type":"mission.completed"',
+    );
+    // CRITICAL: still exactly 1 mission.completed on the wire.
+    expect(completedCountFinal).toBe(1);
+
+    // Sanity: the D1 row DID bump (rule engine still runs; this is
+    // the intentional analytics-accuracy behaviour). What changed is
+    // ONLY the SSE broadcast suppression.
+    const progressAfter = await env.DB.prepare(
+      "SELECT status, current_count FROM mission_progress WHERE user_id = ?1 AND mission_id = ?2",
+    )
+      .bind(userId, "mis_stream_daily_watch_1")
+      .first<{ status: string; current_count: number }>();
+    expect(progressAfter?.status).toBe("completed");
+    expect(progressAfter?.current_count).toBe(2);
+
+    // Teardown.
+    try {
+      await reader.cancel();
+    } catch {
+      // ignore
+    }
+  }, 10_000);
+
+  it("does still broadcast mission.completed on the genuine active→completed transition (positive control)", async () => {
+    // Defensive: the dedup fix must not accidentally also suppress the
+    // FIRST (genuine) completion broadcast. This test is a paired
+    // positive control for the negative assertion above.
+    const userId = `u_f4b_positive_${crypto.randomUUID()}`;
+    const { token } = await mintToken(userId);
+
+    const stubId = env.SSE_HUB.idFromName(userId);
+    const stub = env.SSE_HUB.get(stubId);
+    const subRes = await stub.fetch("https://_/subscribe");
+    expect(subRes.status).toBe(200);
+
+    const reader = subRes.body!.getReader();
+    const decoder = new TextDecoder();
+    const frames: string[] = [];
+    void (async () => {
+      try {
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          if (value !== undefined) frames.push(decoder.decode(value));
+        }
+      } catch {
+        // cancellation expected at teardown
+      }
+    })();
+
+    await new Promise((r) => setTimeout(r, 20));
+
+    // Single video.watched (no prior row exists) → 0→1, target=1 →
+    // active→completed → broadcast MUST fire.
+    const res = await postEvent(
+      {
+        userId,
+        name: "video.watched",
+        payload: { videoId: "v_solo", genre: "drama", duration_sec: 300 },
+        timestamp: Date.now(),
+      },
+      { token },
+    );
+    expect(res.status).toBe(200);
+
+    const completedSeen = await Promise.race([
+      (async () => {
+        while (true) {
+          if (frames.join("").includes('"type":"mission.completed"')) {
+            return true;
+          }
+          await new Promise((r) => setTimeout(r, 25));
+        }
+      })(),
+      new Promise<false>((r) => setTimeout(() => r(false), 3000)),
+    ]);
+    expect(completedSeen).toBe(true);
+
+    try {
+      await reader.cancel();
+    } catch {
+      // ignore
+    }
+  }, 10_000);
+});
+
+/**
+ * Count non-overlapping occurrences of `needle` in `haystack`. Used by the
+ * F4-b dedup tests to assert exact `mission.completed` frame counts on the
+ * wire. Inline rather than imported because vitest doesn't ship a string
+ * helper and the rest of this file has no need for it.
+ */
+function countOccurrences(haystack: string, needle: string): number {
+  if (needle.length === 0) return 0;
+  let count = 0;
+  let pos = 0;
+  while (true) {
+    const idx = haystack.indexOf(needle, pos);
+    if (idx === -1) break;
+    count += 1;
+    pos = idx + needle.length;
+  }
+  return count;
+}
+
 afterEach(() => {
   // Clear any spies. (vi.spyOn in individual tests calls mockRestore but
   // belt-and-braces here.)

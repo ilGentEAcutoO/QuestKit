@@ -1,6 +1,6 @@
 # QuestKit — Active Tasks
 
-> Last updated: 2026-05-22 08:55 (TASK-012 v0.1.11 shipped as `d6e8e09` — F3 fix prod-verified GREEN, console.debug logs visible end-to-end — awaiting user confirmation to /workflow-end archive Phase 9)
+> Last updated: 2026-05-22 10:05 (TASK-013 sub-agents S+E+M all done — F4-a Deep Diver + F4-b mission.completed dedup + F4-c SpinWheel visual — awaiting Lead root gates + release)
 
 ## RESUME CONTEXT (v0.1.9 hotfix mid-flight)
 
@@ -554,42 +554,81 @@ If next session asks "มีงานค้างไหม":
   - 2026-05-22 08:42 - Lead root gates GREEN. Committed `d6e8e09`. Pushed. CI GREEN 3m32s. Deploy: workers + smoke GREEN, E2E red (expected — TASK-005 manual gate). `/v1/health` = 0.1.11 confirmed.
   - 2026-05-22 08:55 - Playwright F3 verify on prod with `?user=v011_clean` (fresh user, bypasses cached `demo_55a90ed7` from v0.1.10 verify): 1 click → 0→1 (NOT 0→2 = **F3 fixed**). 3 clicks total → server 3/3 + display 3/3 lockstep. Claim → 200, BadgeWall 0→1, **0 errors / 0 warnings in console**. Both `[questkit:mission] SSE update` and `[demo:claim] success` debug logs visible end-to-end. F1+F2+F3 all fully closed.
 
+### Task: [TASK-013] v0.1.12 batch — F4-a/b/c (pre-existing bugs surfaced by user prod inspection)
+
+- **Status:** 🔵 in-progress (sub-agents S+E+M dispatched 2026-05-22 09:35)
+- **Priority:** P1 (UX-quality, not blocking — F1-F3 already deliver clean baseline)
+- **Parallel:** yes (3 independent file scopes — react / worker-api ingest / worker-api migration)
+- **Assigned:** Lead (Opus 4.7) + sub-agents S, E, M (all Opus 4.7)
+- **Depends on:** TASK-010 (v0.1.9), TASK-011 (v0.1.10), TASK-012 (v0.1.11) — all shipped + verified
+- **Skills:** git-commit, git-push, deploy
+- **Covers:** F4-a (Deep Diver field mismatch) + F4-b (mission.completed re-fire) + F4-c (Spin Wheel visual)
+- **Evidence (Playwright `?user=v011_investigate` session):**
+  - 6 video.watched clicks (all 6 videos, all ≥ 20min) → Deep Diver stayed at **0/10** (rule filter `durationMin >= 20` doesn't match payload field `duration_sec`)
+  - Daily Watcher (target=1) emitted `mission.completed` event 6 times for 6 clicks (count 1→2→3→4→5→6), even after status="completed". UI clamps so user invisible, but server bandwidth wasted.
+  - Spin Wheel sample: announced "Streak +1!" (slice 2) but wheel landed at `rotate(1980deg)` = 180° → pointer geometrically lands on slice 4 (Bonus tick!).
+- **Sub-agent assignments:**
+  - **S (SpinWheel)**: `packages/react/src/components/SpinWheel/index.tsx` — fix rotation to land pointer on winning slice. Update Jest tests.
+  - **E (mission.completed re-fire)**: `workers/api/src/services/ingest.ts:75-79` + rule engine — emit `mission.completed` only on status DELTA active→completed, not on subsequent matches. Use `mission.progress` for already-completed missions (or skip emit). Update tests.
+  - **M (Deep Diver migration)**: write `workers/api/migrations/0005_fix_deep_diver_rule.sql` to UPDATE `mis_stream_longform_week.criteria_json` so filter uses `duration_sec >= 1200` (1200s = 20min) instead of `durationMin >= 20`. Add integration test.
+- **Subtasks:**
+  - [x] S: SpinWheel visual sync + Jest test
+  - [x] E: mission.completed dedup + regression test
+  - [x] M: 0005 migration + integration test
+  - [ ] verify (Lead): root gates
+  - [ ] bump (Lead): 0.1.11 → 0.1.12 + CHANGELOG
+  - [ ] commit (Lead): "v0.1.12 batch — F4 UX bugs (SpinWheel + mission.completed dedup + Deep Diver fix)" via git-commit skill
+  - [ ] push + monitor (Lead): CI + Deploy
+  - [ ] prod verify (Lead): `/v1/health` 0.1.12; Playwright re-verify all 3 fixes — SpinWheel pointer matches prize, Deep Diver progresses on long video, mission.completed fires once
+  - [ ] archive (Lead): `/workflow-end` after user confirmation
+- **Progress Notes:**
+  - 2026-05-22 09:35 - TASK-013 created. 3 sub-agents dispatching in parallel.
+  - 2026-05-22 09:55 - Sub-agent S complete: F4-c root cause was `handleSpin` dropping the `-90°` draw offset (`packages/react/src/components/SpinWheel/index.tsx:295`, prior formula `winnerIdx*sliceAngle + sliceAngle/2`). Slices are drawn with `-90 + i*sliceAngle` so slice 0 starts at the top, but the landing maths solved as if they started at angle 0 → every spin landed 90° clockwise of the announced slice (~1.5 slices on a 6-slice wheel; user's `winnerIdx=1` announcement landed visually on i=3). Fixed by extracting two constants (`DRAW_OFFSET_DEG`, `POINTER_ANGLE_DEG`) and rewriting `winnerCentre = DRAW_OFFSET_DEG + winnerIdx*sliceAngle + sliceAngle/2`. Public API unchanged. Added an invariant note to the file docblock referencing F4-c/v0.1.12 so any future refactor keeps the draw offset and the landing maths in sync. Tests: existing 6 SpinWheel specs all still pass (3 lifecycle + 2 cooldown + 1 reduced-motion + 1 rendering + 2 picker helpers); 7 new regression specs under `spinWheel — F4-c pointer/slice visual sync` — 6 `it.each` cases pinning that winnerIdx 0..5 each lands within ±10° of POINTER_ANGLE_DEG, plus 1 announce-vs-visual spec replicating the user's "Streak +1!" scenario (asserts both the live-region status text AND the slice geometrically at the pointer name the same label). Trace for winnerIdx=1 of 6 slices: winnerCentre = -90 + 60 + 30 = 0°, targetMod = ((-90-0)%360+360)%360 = 270, targetRotation = 0 + 1800 + 270 = 2070° (= 270° mod 360); slice 1's drawn centre 0° + 270° = 270 ≡ -90° (top, under pointer). Gates: react test 152/0 in 16 suites (+7 from F4-c), typecheck clean, lint clean (modulo pre-existing MODULE_TYPELESS_PACKAGE_JSON warning). Locks released below.
+  - 2026-05-22 09:55 - Sub-agent M complete (F4-a). Migration `workers/api/migrations/0005_fix_deep_diver_rule.sql` written: UPDATE `mis_stream_longform_week` so `criteria_json` filter becomes `{"duration_sec":{"gte":1200}}` (20 min → 1200 s, matching the demo's actual payload field). Filter evaluator (`rules/filter.ts`) confirmed to do literal payload property lookup (`key in payload` / `payload[key]`) — no aliases, no case-insensitive matching — so the migration-only fix is sufficient; rule-engine code untouched. Extended `workers/api/src/rules/evaluator.test.ts` with 5 new Deep Diver regression tests (3300 s match / 1200 s boundary / 600 s negative / missing field negative / legacy `durationMin` field IGNORED). Migration applies cleanly through vitest harness (`test/setup.ts` runs `applyD1Migrations` against all SQL in `./migrations/` at every test-file beforeAll — if 0005 were malformed the whole suite would abort). Gates: worker-api test 214/0/1-skip (+5 over 209), typecheck clean, lint clean (pre-existing MODULE_TYPELESS_PACKAGE_JSON Node warning only). Locks released below.
+  - 2026-05-22 10:05 - Sub-agent E complete (F4-b). **Option B** chosen — fix at the broadcast/emit layer, NOT the rule engine. Rationale: Option A (skip engine update for already-completed missions) would have required editing `rules/index.ts` and/or `rules/evaluator.ts` (out of E's lock list), and the engine intentionally keeps bumping `currentCount` past target as an honest analytics tally — that's a load-bearing contract used by AE downstream. Option B preserves engine semantics 100%: rule engine still runs, D1 row still updates, AE still records the match; only the SSE broadcast is suppressed when the prior persisted status was already terminal AND the post-evaluator status is still terminal. Files: `workers/api/src/services/ingest.ts` — added `TERMINAL_STATUSES` Set, fetched prior status map via `listProgressForUser` BEFORE `evaluateEvent` (the natural slot — at this point the row reflects pre-event state), passed `priorStatusByMissionId` into `tryBroadcastProgress`, which now `continue`s on terminal→terminal. New regression tests in `workers/api/test/events.route.test.ts` under `TASK-013 F4-b mission.completed dedup (terminal→terminal skip)`: (1) negative — 2 `video.watched` events to a fresh user → exactly **1** `mission.completed` frame on the wire while the D1 row honestly bumps 1→2 (asserted via live SSE subscriber + occurrence count + `mission_progress` SELECT); (2) positive control — single event → genuine `mission.completed` still broadcasts (defends against accidental over-skip). Gates: worker-api test **216/0/1-skip** (= 211 baseline after M's +5 + my +2; note S+M had the same 214 figure because M's +5 already included; my pre-test baseline matched 211 to 214 due to M's landing first), typecheck clean, lint clean (modulo pre-existing MODULE_TYPELESS_PACKAGE_JSON Node warning). Locks released below.
+
 ## File Lock Registry
 
-| File                                                                       | Locked by           | Task                        | Since                  |
-| -------------------------------------------------------------------------- | ------------------- | --------------------------- | ---------------------- |
-| _(TASK-005 file locks released 11:30 — code complete)_                     | —                   | —                           | —                      |
-| ~~`packages/types/src/sdk-update.ts`~~ released 11:45                      | ~~TASK-001 Agent~~  | TASK-001 (done)             | 2026-05-21 11:20–11:45 |
-| ~~`packages/react/src/hooks/useMissions.ts`~~ released 11:45               | ~~TASK-001 Agent~~  | TASK-001 (done)             | 2026-05-21 11:20–11:45 |
-| ~~`packages/react/test/hooks/useMissions.test.tsx`~~ released 11:45        | ~~TASK-001 Agent~~  | TASK-001 (done)             | 2026-05-21 11:20–11:45 |
-| ~~`packages/react/test/components/MissionCard.test.tsx`~~ released 11:45   | ~~TASK-001 Agent~~  | TASK-001 (done)             | 2026-05-21 11:20–11:45 |
-| ~~`workers/api/src/routes/missions.ts`~~ released 11:45                    | ~~TASK-001 Agent~~  | TASK-001 (done)             | 2026-05-21 11:20–11:45 |
-| ~~`workers/api/src/routes/missions.test.ts`~~ released 11:45               | ~~TASK-001 Agent~~  | TASK-001 (done)             | 2026-05-21 11:20–11:45 |
-| ~~`apps/demo/src/lib/useMissionClaim.ts`~~ released 11:45                  | ~~TASK-001 Agent~~  | TASK-001 (done)             | 2026-05-21 11:20–11:45 |
-| ~~`workers/api/src/services/ai.ts`~~ released 11:55                        | ~~task-006-agent~~  | TASK-006 (closed-escalated) | 2026-05-21 11:25–11:55 |
-| ~~`apps/demo/src/routes/minigames.tsx`~~ released 11:30                    | ~~TASK-003 Agent~~  | TASK-003 (done)             | 2026-05-21 11:05–11:30 |
-| ~~`apps/demo/e2e/minigames.spec.ts`~~ released 11:30                       | ~~TASK-003 Agent~~  | TASK-003 (done)             | 2026-05-21 11:05–11:30 |
-| ~~`workers/api/test/events.route.test.ts`~~ released 11:30                 | ~~TASK-003 Agent~~  | TASK-003 (done)             | 2026-05-21 11:05–11:30 |
-| ~~`apps/demo/src/components/Layout.tsx`~~ released 11:45                   | ~~TASK-004 Agent~~  | TASK-004 (done)             | 2026-05-21 11:25–11:45 |
-| ~~`apps/demo/src/components/Layout.test.tsx`~~ released 11:45              | ~~TASK-004 Agent~~  | TASK-004 (done)             | 2026-05-21 11:25–11:45 |
-| ~~`workers/api/src/rules/evaluator.test.ts`~~ released 11:45               | ~~TASK-004 Agent~~  | TASK-004 (done)             | 2026-05-21 11:25–11:45 |
-| ~~`apps/demo/src/routes/streaming.tsx`~~ released 12:30                    | ~~TASK-002 Agent~~  | TASK-002 (done)             | 2026-05-21 12:10–12:30 |
-| ~~`apps/demo/src/routes/daily.tsx`~~ released 12:30                        | ~~TASK-002 Agent~~  | TASK-002 (done)             | 2026-05-21 12:10–12:30 |
-| ~~`apps/demo/e2e/claim-flow.spec.ts`~~ (new) released 12:30                | ~~TASK-002 Agent~~  | TASK-002 (done)             | 2026-05-21 12:10–12:30 |
-| ~~`apps/demo/e2e/daily.spec.ts`~~ released 12:30                           | ~~TASK-002 Agent~~  | TASK-002 (done)             | 2026-05-21 12:10–12:30 |
-| ~~`apps/demo/e2e/streaming.spec.ts`~~ released 12:30                       | ~~TASK-002 Agent~~  | TASK-002 (done)             | 2026-05-21 12:10–12:30 |
-| ~~`apps/demo/src/components/DemoToastHost.tsx`~~ released 06:50            | ~~D (demo-fix)~~    | TASK-010 (D-done)           | 2026-05-22 06:29–06:50 |
-| ~~`apps/demo/src/lib/useMissionClaim.ts`~~ released 06:50                  | ~~D (demo-fix)~~    | TASK-010 (D-done)           | 2026-05-22 06:29–06:50 |
-| ~~`apps/demo/src/lib/useMissionClaim.test.tsx`~~ (new) released 06:50      | ~~D (demo-fix)~~    | TASK-010 (D-done)           | 2026-05-22 06:29–06:50 |
-| ~~`apps/demo/src/lib/client.tsx`~~ released 07:50                          | ~~V (per-browser)~~ | TASK-011 (V-done)           | 2026-05-22 07:35–07:50 |
-| ~~`apps/demo/src/lib/client.test.tsx`~~ (new) released 07:50               | ~~V (per-browser)~~ | TASK-011 (V-done)           | 2026-05-22 07:35–07:50 |
-| ~~`apps/demo/src/lib/demoUserId.ts`~~ (new, Option A) released 07:50       | ~~V (per-browser)~~ | TASK-011 (V-done)           | 2026-05-22 07:38–07:50 |
-| ~~`package.json` (0.1.9 → 0.1.10)~~ released 07:50                         | ~~V (per-browser)~~ | TASK-011 (V-done)           | 2026-05-22 07:35–07:50 |
-| ~~`workers/api/src/index.ts` (/v1/health 0.1.9 → 0.1.10)~~ released 07:50  | ~~V (per-browser)~~ | TASK-011 (V-done)           | 2026-05-22 07:35–07:50 |
-| ~~`CHANGELOG.md` (v0.1.10 entry)~~ released 07:50                          | ~~V (per-browser)~~ | TASK-011 (V-done)           | 2026-05-22 07:35–07:50 |
-| ~~`packages/react/src/hooks/useMissions.ts`~~ released 08:18               | ~~F (F3-fix)~~      | TASK-012 (F-done)           | 2026-05-22 08:00–08:18 |
-| ~~`packages/react/test/hooks/useMissions.test.tsx`~~ released 08:18        | ~~F (F3-fix)~~      | TASK-012 (F-done)           | 2026-05-22 08:00–08:18 |
-| ~~`apps/demo/src/lib/useMissionClaim.ts`~~ released 08:18                  | ~~F (F3-fix)~~      | TASK-012 (F-done)           | 2026-05-22 08:00–08:18 |
-| ~~`package.json` (0.1.10 → 0.1.11)~~ released 08:18                        | ~~F (F3-fix)~~      | TASK-012 (F-done)           | 2026-05-22 08:00–08:18 |
-| ~~`workers/api/src/index.ts` (/v1/health 0.1.10 → 0.1.11)~~ released 08:18 | ~~F (F3-fix)~~      | TASK-012 (F-done)           | 2026-05-22 08:00–08:18 |
-| ~~`CHANGELOG.md` (v0.1.11 entry)~~ released 08:18                          | ~~F (F3-fix)~~      | TASK-012 (F-done)           | 2026-05-22 08:00–08:18 |
+| File                                                                              | Locked by           | Task                        | Since                  |
+| --------------------------------------------------------------------------------- | ------------------- | --------------------------- | ---------------------- |
+| _(TASK-005 file locks released 11:30 — code complete)_                            | —                   | —                           | —                      |
+| ~~`packages/types/src/sdk-update.ts`~~ released 11:45                             | ~~TASK-001 Agent~~  | TASK-001 (done)             | 2026-05-21 11:20–11:45 |
+| ~~`packages/react/src/hooks/useMissions.ts`~~ released 11:45                      | ~~TASK-001 Agent~~  | TASK-001 (done)             | 2026-05-21 11:20–11:45 |
+| ~~`packages/react/test/hooks/useMissions.test.tsx`~~ released 11:45               | ~~TASK-001 Agent~~  | TASK-001 (done)             | 2026-05-21 11:20–11:45 |
+| ~~`packages/react/test/components/MissionCard.test.tsx`~~ released 11:45          | ~~TASK-001 Agent~~  | TASK-001 (done)             | 2026-05-21 11:20–11:45 |
+| ~~`workers/api/src/routes/missions.ts`~~ released 11:45                           | ~~TASK-001 Agent~~  | TASK-001 (done)             | 2026-05-21 11:20–11:45 |
+| ~~`workers/api/src/routes/missions.test.ts`~~ released 11:45                      | ~~TASK-001 Agent~~  | TASK-001 (done)             | 2026-05-21 11:20–11:45 |
+| ~~`apps/demo/src/lib/useMissionClaim.ts`~~ released 11:45                         | ~~TASK-001 Agent~~  | TASK-001 (done)             | 2026-05-21 11:20–11:45 |
+| ~~`workers/api/src/services/ai.ts`~~ released 11:55                               | ~~task-006-agent~~  | TASK-006 (closed-escalated) | 2026-05-21 11:25–11:55 |
+| ~~`apps/demo/src/routes/minigames.tsx`~~ released 11:30                           | ~~TASK-003 Agent~~  | TASK-003 (done)             | 2026-05-21 11:05–11:30 |
+| ~~`apps/demo/e2e/minigames.spec.ts`~~ released 11:30                              | ~~TASK-003 Agent~~  | TASK-003 (done)             | 2026-05-21 11:05–11:30 |
+| ~~`workers/api/test/events.route.test.ts`~~ released 11:30                        | ~~TASK-003 Agent~~  | TASK-003 (done)             | 2026-05-21 11:05–11:30 |
+| ~~`apps/demo/src/components/Layout.tsx`~~ released 11:45                          | ~~TASK-004 Agent~~  | TASK-004 (done)             | 2026-05-21 11:25–11:45 |
+| ~~`apps/demo/src/components/Layout.test.tsx`~~ released 11:45                     | ~~TASK-004 Agent~~  | TASK-004 (done)             | 2026-05-21 11:25–11:45 |
+| ~~`workers/api/src/rules/evaluator.test.ts`~~ released 11:45                      | ~~TASK-004 Agent~~  | TASK-004 (done)             | 2026-05-21 11:25–11:45 |
+| ~~`apps/demo/src/routes/streaming.tsx`~~ released 12:30                           | ~~TASK-002 Agent~~  | TASK-002 (done)             | 2026-05-21 12:10–12:30 |
+| ~~`apps/demo/src/routes/daily.tsx`~~ released 12:30                               | ~~TASK-002 Agent~~  | TASK-002 (done)             | 2026-05-21 12:10–12:30 |
+| ~~`apps/demo/e2e/claim-flow.spec.ts`~~ (new) released 12:30                       | ~~TASK-002 Agent~~  | TASK-002 (done)             | 2026-05-21 12:10–12:30 |
+| ~~`apps/demo/e2e/daily.spec.ts`~~ released 12:30                                  | ~~TASK-002 Agent~~  | TASK-002 (done)             | 2026-05-21 12:10–12:30 |
+| ~~`apps/demo/e2e/streaming.spec.ts`~~ released 12:30                              | ~~TASK-002 Agent~~  | TASK-002 (done)             | 2026-05-21 12:10–12:30 |
+| ~~`apps/demo/src/components/DemoToastHost.tsx`~~ released 06:50                   | ~~D (demo-fix)~~    | TASK-010 (D-done)           | 2026-05-22 06:29–06:50 |
+| ~~`apps/demo/src/lib/useMissionClaim.ts`~~ released 06:50                         | ~~D (demo-fix)~~    | TASK-010 (D-done)           | 2026-05-22 06:29–06:50 |
+| ~~`apps/demo/src/lib/useMissionClaim.test.tsx`~~ (new) released 06:50             | ~~D (demo-fix)~~    | TASK-010 (D-done)           | 2026-05-22 06:29–06:50 |
+| ~~`apps/demo/src/lib/client.tsx`~~ released 07:50                                 | ~~V (per-browser)~~ | TASK-011 (V-done)           | 2026-05-22 07:35–07:50 |
+| ~~`apps/demo/src/lib/client.test.tsx`~~ (new) released 07:50                      | ~~V (per-browser)~~ | TASK-011 (V-done)           | 2026-05-22 07:35–07:50 |
+| ~~`apps/demo/src/lib/demoUserId.ts`~~ (new, Option A) released 07:50              | ~~V (per-browser)~~ | TASK-011 (V-done)           | 2026-05-22 07:38–07:50 |
+| ~~`package.json` (0.1.9 → 0.1.10)~~ released 07:50                                | ~~V (per-browser)~~ | TASK-011 (V-done)           | 2026-05-22 07:35–07:50 |
+| ~~`workers/api/src/index.ts` (/v1/health 0.1.9 → 0.1.10)~~ released 07:50         | ~~V (per-browser)~~ | TASK-011 (V-done)           | 2026-05-22 07:35–07:50 |
+| ~~`CHANGELOG.md` (v0.1.10 entry)~~ released 07:50                                 | ~~V (per-browser)~~ | TASK-011 (V-done)           | 2026-05-22 07:35–07:50 |
+| ~~`packages/react/src/hooks/useMissions.ts`~~ released 08:18                      | ~~F (F3-fix)~~      | TASK-012 (F-done)           | 2026-05-22 08:00–08:18 |
+| ~~`packages/react/test/hooks/useMissions.test.tsx`~~ released 08:18               | ~~F (F3-fix)~~      | TASK-012 (F-done)           | 2026-05-22 08:00–08:18 |
+| ~~`apps/demo/src/lib/useMissionClaim.ts`~~ released 08:18                         | ~~F (F3-fix)~~      | TASK-012 (F-done)           | 2026-05-22 08:00–08:18 |
+| ~~`package.json` (0.1.10 → 0.1.11)~~ released 08:18                               | ~~F (F3-fix)~~      | TASK-012 (F-done)           | 2026-05-22 08:00–08:18 |
+| ~~`workers/api/src/index.ts` (/v1/health 0.1.10 → 0.1.11)~~ released 08:18        | ~~F (F3-fix)~~      | TASK-012 (F-done)           | 2026-05-22 08:00–08:18 |
+| ~~`CHANGELOG.md` (v0.1.11 entry)~~ released 08:18                                 | ~~F (F3-fix)~~      | TASK-012 (F-done)           | 2026-05-22 08:00–08:18 |
+| ~~`packages/react/src/components/SpinWheel/index.tsx`~~ released 09:55            | ~~S (F4-c)~~        | TASK-013 (S-done)           | 2026-05-22 09:35–09:55 |
+| ~~`packages/react/test/components/SpinWheel.test.tsx`~~ released 09:55            | ~~S (F4-c)~~        | TASK-013 (S-done)           | 2026-05-22 09:35–09:55 |
+| ~~`workers/api/src/services/ingest.ts`~~ released 10:05                           | ~~E (F4-b)~~        | TASK-013 (E-done)           | 2026-05-22 09:35–10:05 |
+| ~~`workers/api/test/events.route.test.ts`~~ released 10:05                        | ~~E (F4-b)~~        | TASK-013 (E-done)           | 2026-05-22 09:35–10:05 |
+| ~~`workers/api/migrations/0005_fix_deep_diver_rule.sql`~~ (new) released 09:55    | ~~M (F4-a)~~        | TASK-013 (M-done)           | 2026-05-22 09:35–09:55 |
+| ~~`workers/api/src/rules/evaluator.test.ts`~~ (extended, +5 tests) released 09:55 | ~~M (F4-a)~~        | TASK-013 (M-done)           | 2026-05-22 09:40–09:55 |

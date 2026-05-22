@@ -274,3 +274,121 @@ describe("spinWheel — reduced motion", () => {
     }
   });
 });
+
+/**
+ * F4-c regression (v0.1.12) — visual landing must match the announced
+ * winner. Before the fix, the rotation maths dropped the `-90°` draw
+ * offset and landed the pointer ~1.5 slices clockwise of the announced
+ * slice. We pin the contract here by reading the inline transform off
+ * the rotor and asserting the slice geometrically under the pointer
+ * (angle = -90°) matches the announced label.
+ *
+ * Pointer/slice maths (mirrors the component):
+ *   - DRAW_OFFSET_DEG = -90, POINTER_ANGLE_DEG = -90, sliceAngle = 360/N.
+ *   - Slice i's drawn centre = DRAW_OFFSET_DEG + i*sliceAngle + sliceAngle/2.
+ *   - After rotation R, slice i appears at (drawnCentre + R) mod 360.
+ *   - The slice under the pointer is the one whose appearing-centre is
+ *     closest (modulo 360) to POINTER_ANGLE_DEG.
+ */
+function readRotationDeg(rotor: Element): number {
+  const transform = (rotor as HTMLElement).style.transform;
+  const m = transform.match(/rotate\((-?[\d.]+)deg\)/);
+  if (m === null) throw new Error(`no rotate() in transform: ${transform}`);
+  return Number.parseFloat(m[1] ?? "0");
+}
+
+function sliceUnderPointer(
+  rotationDeg: number,
+  sliceCount: number,
+): { index: number; offsetDeg: number } {
+  const sliceAngle = 360 / sliceCount;
+  const DRAW_OFFSET_DEG = -90;
+  const POINTER_ANGLE_DEG = -90;
+  let best = { index: 0, offsetDeg: Number.POSITIVE_INFINITY };
+  for (let i = 0; i < sliceCount; i++) {
+    const drawnCentre = DRAW_OFFSET_DEG + i * sliceAngle + sliceAngle / 2;
+    const appearing = drawnCentre + rotationDeg;
+    // Smallest signed delta to POINTER, modulo 360, in [-180, 180].
+    const delta = ((((appearing - POINTER_ANGLE_DEG) % 360) + 540) % 360) - 180;
+    if (Math.abs(delta) < Math.abs(best.offsetDeg)) {
+      best = { index: i, offsetDeg: delta };
+    }
+  }
+  return best;
+}
+
+describe("spinWheel — F4-c pointer/slice visual sync", () => {
+  // Six-slice wheel mirrors the live demo scenario from the bug report.
+  const SIX_REWARDS = [
+    { label: "Lucky spin!", reward: { kind: "badge" as const, badgeId: "a" } },
+    { label: "Streak +1!", reward: { kind: "badge" as const, badgeId: "b" } },
+    { label: "Sparkle!", reward: { kind: "badge" as const, badgeId: "c" } },
+    { label: "Bonus tick!", reward: { kind: "badge" as const, badgeId: "d" } },
+    { label: "Big spin!", reward: { kind: "badge" as const, badgeId: "e" } },
+    { label: "Top combo!", reward: { kind: "badge" as const, badgeId: "f" } },
+  ];
+
+  // Property-style: every winning index lands its own slice under the pointer.
+  it.each([0, 1, 2, 3, 4, 5])(
+    "rotates so winnerIdx=%i lands under the pointer (within ±10°)",
+    (winnerIdx) => {
+      const restore = stubGetRandomValues(
+        uint32ForCenterOfSlice(winnerIdx, SIX_REWARDS.length),
+      );
+      try {
+        render(
+          <SpinWheel
+            rewards={SIX_REWARDS}
+            cooldownMs={60_000}
+            id={`sync-${winnerIdx}`}
+            onSpin={() => {}}
+          />,
+        );
+        act(() => {
+          fireEvent.click(screen.getByRole("button"));
+        });
+        const rotor = screen.getByTestId("qk-spinwheel-rotor");
+        const rotation = readRotationDeg(rotor);
+        const landing = sliceUnderPointer(rotation, SIX_REWARDS.length);
+        expect(landing.index).toBe(winnerIdx);
+        expect(Math.abs(landing.offsetDeg)).toBeLessThan(10);
+      } finally {
+        restore();
+      }
+    },
+  );
+
+  // End-to-end: the announced text and the visual landing must agree.
+  it("announced winner text matches the slice geometrically under the pointer", () => {
+    const winnerIdx = 1; // "Streak +1!" — the exact user-reported case
+    const restore = stubGetRandomValues(
+      uint32ForCenterOfSlice(winnerIdx, SIX_REWARDS.length),
+    );
+    try {
+      render(
+        <SpinWheel
+          rewards={SIX_REWARDS}
+          cooldownMs={60_000}
+          id="announce-vs-visual"
+          onSpin={() => {}}
+        />,
+      );
+      act(() => {
+        fireEvent.click(screen.getByRole("button"));
+      });
+      const rotor = screen.getByTestId("qk-spinwheel-rotor");
+      act(() => {
+        fireTransformTransitionEnd(rotor);
+      });
+      const status = screen.getByRole("status");
+      // Live region carries "You won: <label>" once the spin settles.
+      expect(status).toHaveTextContent(/You won: Streak \+1!/);
+      const rotation = readRotationDeg(rotor);
+      const landing = sliceUnderPointer(rotation, SIX_REWARDS.length);
+      const announcedLabel = SIX_REWARDS[landing.index]?.label;
+      expect(announcedLabel).toBe("Streak +1!");
+    } finally {
+      restore();
+    }
+  });
+});

@@ -28,10 +28,24 @@ import {
   getEventByIdemKey,
   insertEvent,
   listMissions,
+  listProgressForUser,
 } from "../db/schema";
 import { evaluateEvent } from "../rules";
 import { writeEventDataPoint } from "./ae";
 import * as idem from "./idempotency";
+
+/**
+ * Status values considered "terminal" for SSE broadcast deduplication.
+ * Once a mission_progress row is in one of these states, the client has
+ * already received the `mission.completed` (or `mission.claimed`) event
+ * for that completion cycle. Subsequent rule-engine updates that keep the
+ * status terminal (e.g. currentCount bumping past target for analytics)
+ * MUST NOT re-broadcast `mission.completed` — see v0.1.12 F4-b.
+ */
+const TERMINAL_STATUSES: ReadonlySet<MissionProgress["status"]> = new Set([
+  "completed",
+  "claimed",
+]);
 
 /**
  * Per-call ceiling for any SSE_HUB DO RPC. Mirrors the constant in
@@ -62,21 +76,55 @@ const SSE_HUB_TIMEOUT_MS = 2000;
  * CALLER detaches the whole `tryBroadcastProgress` invocation via
  * `ctx.waitUntil(...)` (see `IngestEventContext.waitUntil`) so even
  * healthy-but-slow broadcasts don't gate the ingest response.
+ *
+ * Terminal-state dedup (v0.1.12 F4-b — TASK-013): the rule engine
+ * keeps bumping `currentCount` for already-completed missions on
+ * subsequent matching events (this is intentional for analytics
+ * accuracy — the row stays an honest tally). But the SDK should NOT
+ * see a second `mission.completed` event for the same completion
+ * cycle, because:
+ *   1. The client already received the completion notification and
+ *      ran its celebration toast / refetch on the original transition.
+ *   2. Re-firing `mission.completed` confuses downstream consumers
+ *      (e.g. analytics that count "completion events") and wastes
+ *      SSE_HUB DO writes on every subsequent qualifying event.
+ *
+ * Fix: when the prior persisted status was already terminal
+ * ("completed" or "claimed") AND the new status is also terminal, skip
+ * the broadcast for that mission entirely. The D1 row still updates
+ * (handled upstream by `evaluateEvent`); we just don't tell the
+ * subscriber about a state change that didn't happen.
+ *
+ * Genuine transitions still broadcast normally:
+ *   - active → completed → `mission.completed` (the real completion)
+ *   - locked/active → active → `mission.progress` (running counter)
+ *   - completed → claimed → handled by `routes/missions.ts`
+ *     `tryBroadcastClaim`, not here.
  */
 async function tryBroadcastProgress(
   env: Env,
   userId: string,
   updated: MissionProgress[],
+  priorStatusByMissionId: ReadonlyMap<string, MissionProgress["status"]>,
 ): Promise<void> {
   if (updated.length === 0) return;
   try {
     const stubId = env.SSE_HUB.idFromName(userId);
     const stub = env.SSE_HUB.get(stubId);
     for (const progress of updated) {
-      const update: SDKUpdate =
-        progress.status === "completed" || progress.status === "claimed"
-          ? { type: "mission.completed", data: progress }
-          : { type: "mission.progress", data: progress };
+      const newIsTerminal = TERMINAL_STATUSES.has(progress.status);
+      const priorStatus = priorStatusByMissionId.get(progress.missionId);
+      const priorWasTerminal =
+        priorStatus !== undefined && TERMINAL_STATUSES.has(priorStatus);
+
+      // Terminal → terminal: skip broadcast entirely (F4-b dedup).
+      if (priorWasTerminal && newIsTerminal) {
+        continue;
+      }
+
+      const update: SDKUpdate = newIsTerminal
+        ? { type: "mission.completed", data: progress }
+        : { type: "mission.progress", data: progress };
       const resp = await stub.fetch("https://_/broadcast", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -233,6 +281,23 @@ export async function ingestEventCore(
   // then-filter is fine for the 6 seeded missions; production wants a
   // DB-side filter on `missions.criteria_json -> eventName = body.name`.
   const { missions: candidateMissions } = await listMissions(env.DB);
+
+  // Capture the user's PRIOR progress map BEFORE running the evaluator so
+  // the broadcast step can detect terminal→terminal transitions and skip
+  // re-firing `mission.completed` for an already-completed mission. See
+  // `tryBroadcastProgress`'s "Terminal-state dedup" doc for the why.
+  //
+  // We collect only the discriminator (status) — the broadcast layer just
+  // needs to know whether each mission was already in a terminal state.
+  // Using `listProgressForUser` keeps the query off the rule-engine module
+  // (which owns its own IN-clause variant); duplicating one small fetch is
+  // worth the file-scope cleanliness.
+  const priorProgress = await listProgressForUser(env.DB, userId);
+  const priorStatusByMissionId = new Map<string, MissionProgress["status"]>();
+  for (const p of priorProgress) {
+    priorStatusByMissionId.set(p.missionId, p.status);
+  }
+
   const updated = await evaluateEvent(env.DB, eventToInsert, candidateMissions);
 
   // Step 9: AE write. `requestCountry` only flows through for HTTP callers;
@@ -255,9 +320,11 @@ export async function ingestEventCore(
   // back to the awaited path (the test environments don't have wedged DOs
   // so the latency cost is negligible).
   if (ctx.waitUntil !== undefined) {
-    ctx.waitUntil(tryBroadcastProgress(env, userId, updated));
+    ctx.waitUntil(
+      tryBroadcastProgress(env, userId, updated, priorStatusByMissionId),
+    );
   } else {
-    await tryBroadcastProgress(env, userId, updated);
+    await tryBroadcastProgress(env, userId, updated, priorStatusByMissionId);
   }
 
   // Step 11: build the response shape, then cache if an idempotency key was

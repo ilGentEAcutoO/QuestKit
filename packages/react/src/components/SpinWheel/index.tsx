@@ -25,6 +25,17 @@ import type { Reward } from "@questkit/types";
  *   3. Add `spinsExtra * 360` so the wheel makes several full revolutions
  *      before landing — that's what sells the "spin" feeling.
  *
+ * **Pointer/slice-angle invariant (READ ME — F4-c, v0.1.12):**
+ *   The slices are *drawn* with a `-90°` offset so slice 0's leading edge
+ *   starts at the top: slice `i`'s centre is at SVG angle
+ *   `DRAW_OFFSET_DEG + i*sliceAngle + sliceAngle/2` where
+ *   `DRAW_OFFSET_DEG = -90`. The rotation maths MUST use the same offset
+ *   when solving for the landing angle. Forgetting the `-90` shifts the
+ *   landing by exactly 90° (≈ 1.5 slices on a 6-slice wheel) — the bug
+ *   v0.1.12 closes (was: "wheel announces X but lands on Y"). Any future
+ *   refactor that changes either the draw offset or the formula MUST
+ *   keep them in sync — see the `DRAW_OFFSET_DEG` constant below.
+ *
  * **Cooldown:**
  *   Persisted in `localStorage` under `qk-spin-${id}`. When `Date.now()`
  *   is still inside the cooldown window the button is disabled and shows
@@ -174,6 +185,17 @@ const SPINS_EXTRA = 5;
 /** Animation duration in ms — must match the CSS `transition-duration`. */
 const ANIMATION_MS = 4000;
 
+/**
+ * SVG angle (degrees) at which slice 0's leading edge is drawn. The slice
+ * loop uses `-90` so slice 0 starts at the top of the wheel. The spin
+ * landing maths in `handleSpin` MUST use the same constant — see the
+ * pointer/slice-angle invariant note in the file docblock. (F4-c, v0.1.12.)
+ */
+const DRAW_OFFSET_DEG = -90;
+
+/** SVG angle (degrees) of the pointer — fixed at the top of the wheel. */
+const POINTER_ANGLE_DEG = -90;
+
 function readReducedMotion(): boolean {
   if (typeof window === "undefined") return false;
   if (typeof window.matchMedia !== "function") return false;
@@ -285,19 +307,26 @@ export function SpinWheel({
     const winner = rewards[winnerIdx];
     if (winner === undefined) return;
 
-    // Where the *current* rotation puts winner's centre:
-    //   sliceCentreAngle = winnerIdx * sliceAngle + sliceAngle/2
-    // The pointer points to the top (angle -90° in our SVG, i.e. the
-    // line from centre to (cx, 0)). We want the winning slice's centre
-    // to land at -90°. With the wheel rotated by R degrees clockwise,
-    // a slice originally drawn at angle A appears at angle A + R.
-    // Solve A + R ≡ -90 (mod 360) → R ≡ -90 - A.
-    const winnerCentre = winnerIdx * sliceAngleDeg + sliceAngleDeg / 2;
+    // Where the *current* (un-rotated) slice draws its centre:
+    //   sliceCentreAngle = DRAW_OFFSET_DEG + winnerIdx*sliceAngle + sliceAngle/2
+    // The pointer points to the top of the wheel (POINTER_ANGLE_DEG = -90°).
+    // We want the winning slice's centre to land at POINTER_ANGLE_DEG.
+    // With the wheel rotated by R degrees clockwise, a slice originally
+    // drawn at angle A appears at angle A + R. Solve A + R ≡ POINTER
+    // (mod 360) → R ≡ POINTER - A.
+    //
+    // F4-c, v0.1.12: the prior formula dropped the DRAW_OFFSET_DEG term
+    // (treating slice 0's centre as `+sliceAngle/2` instead of
+    // `DRAW_OFFSET_DEG + sliceAngle/2`) and landed every spin 90° off —
+    // ~1.5 slices on a 6-slice wheel. The visual landed on the slice
+    // adjacent-and-to-the-left of the announced slice. Keep the offset.
+    const winnerCentre =
+      DRAW_OFFSET_DEG + winnerIdx * sliceAngleDeg + sliceAngleDeg / 2;
     // Aim for the smallest non-negative angle that *also* adds
     // SPINS_EXTRA full rotations and exceeds the current rotation.
     // We compute the *delta* on top of the existing rotation so the
     // CSS animation goes forward, not backward.
-    const targetMod = (((-90 - winnerCentre) % 360) + 360) % 360;
+    const targetMod = (((POINTER_ANGLE_DEG - winnerCentre) % 360) + 360) % 360;
     // Current rotation modulo 360 — to figure out how much more we need
     // to add before SPINS_EXTRA kicks in.
     const currentMod = ((rotationDeg % 360) + 360) % 360;
@@ -410,10 +439,9 @@ export function SpinWheel({
           >
             {rewards.map((slice, i) => {
               // SVG angle 0 is at 3 o'clock; we want slice 0 to start at
-              // the top (-90° in degrees). We add a constant offset so
-              // the first slice's leading edge is at the top of the
-              // wheel.
-              const startDeg = -90 + i * sliceAngleDeg;
+              // the top (DRAW_OFFSET_DEG = -90°). The same constant is
+              // used by the spin landing maths in `handleSpin`. (F4-c.)
+              const startDeg = DRAW_OFFSET_DEG + i * sliceAngleDeg;
               const endDeg = startDeg + sliceAngleDeg;
               const startRad = (startDeg * Math.PI) / 180;
               const endRad = (endDeg * Math.PI) / 180;

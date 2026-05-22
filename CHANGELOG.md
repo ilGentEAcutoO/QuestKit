@@ -5,6 +5,78 @@ All notable changes to QuestKit are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.12] — 2026-05-22 — F4 batch (SpinWheel visual + mission.completed dedup + Deep Diver field)
+
+User prod inspection of v0.1.11 surfaced three pre-existing UX defects
+unrelated to the F1+F2+F3 chain — none caused by v0.1.9-11 changes, all
+present since Phase 7-8 but never reported until users started trusting
+the demo enough to lean on it.
+
+### Fixed
+
+- **`packages/react/src/components/SpinWheel/index.tsx` — visual pointer
+  now lands on the announced winning slice (F4-c).** Root cause: the
+  slice-draw loop started at `-90°` (top of wheel) but the
+  landing-rotation math omitted that offset, so every spin ended ~1.5
+  slices clockwise of the announced winner. Extracted
+  `DRAW_OFFSET_DEG` and `POINTER_ANGLE_DEG` constants used by BOTH the
+  draw loop and the landing math; the formula is now
+  `targetRotation = baseSpins * 360 + (POINTER_ANGLE_DEG - (DRAW_OFFSET_DEG + winnerIdx * sliceAngleDeg + sliceAngleDeg / 2))` normalized
+  to a positive degree. Public API unchanged. +7 Jest specs (one
+  per `winnerIdx 0..5` plus an announce-vs-visual replication of the
+  user's "Streak +1!" evidence) pin the contract.
+- **`workers/api/src/services/ingest.ts` — `mission.completed` SSE
+  event no longer re-fires on subsequent matching events for an
+  already-completed mission (F4-b).** Root cause: the rule engine
+  intentionally keeps bumping `currentCount` for already-completed
+  rows for analytics accuracy, but the broadcast layer in
+  `tryBroadcastProgress` was unconditionally re-emitting
+  `mission.completed` per bump (Daily Watcher with target=1 fired
+  `mission.completed` 6 times for 6 video.watched events). Fix
+  (Option B — emit-layer): capture `priorStatusByMissionId` before
+  `evaluateEvent`, then `continue` past the SSE emit when both prior
+  AND new status are terminal. Rule engine semantics + D1 row updates
+  unchanged. +2 regression tests in
+  `workers/api/test/events.route.test.ts` (one negative — no
+  duplicate frame, one positive control — genuine active→completed
+  transition still broadcasts).
+- **`workers/api/migrations/0005_fix_deep_diver_rule.sql` (new) —
+  Deep Diver mission now actually progresses on long-form videos
+  (F4-a).** Root cause: the rule criteria filter was
+  `{durationMin: {gte: 20}}` (minutes) but the demo's `video.watched`
+  event payload sends `duration_sec` (seconds). Filter is strictly
+  literal payload-property lookup (confirmed in
+  `workers/api/src/rules/filter.ts`) — no aliases — so the field
+  mismatch silently rejected every event. Migration `UPDATE`s
+  `mis_stream_longform_week.criteria_json` to use
+  `{duration_sec: {gte: 1200}}` (1200s = 20min). +5 evaluator tests
+  in `workers/api/src/rules/evaluator.test.ts` covering boundary,
+  match, no-match, missing-field, and legacy-field-ignored cases.
+
+### Why this matters
+
+v0.1.9-11 closed the F1+F2+F3 chain (silent claim failure → demo error
+toast → per-browser user → no double-bump). With those baseline UX
+guarantees, users finally exercised the demo end-to-end and surfaced
+defects that had been latent. v0.1.12 closes the next layer (visual
+sync, redundant SSE emit, rule data correctness). Phase 9 archive now
+truly clean.
+
+### Verification
+
+- `pnpm typecheck` 14/14 packages clean
+- `pnpm lint` 10/10 packages clean (modulo pre-existing Node ESM warning)
+- `pnpm test` 500+ tests, 0 failures, 1 pre-existing skip:
+  - `@questkit/react`: 152 tests (was 145, +7 from F4-c)
+  - `@questkit/worker-api`: 216 tests (was 209, +5 from F4-a, +2 from F4-b)
+  - `@questkit/demo`, `@questkit/core`, `@questkit/embed`: unchanged
+
+### Cross-references
+
+- TASK-013 in `instruction/work/todos.md` for full evidence trail
+- `agent-temp/spin-wheel-mismatch-prize-vs-pointer.png` — pre-fix screenshot
+- Continues from v0.1.11 (commit `d6e8e09`)
+
 ## [0.1.11] — 2026-05-22 — F3 fix + browser logging
 
 Playwright prod-verify of v0.1.10 (per-browser demo user) confirmed F1 +

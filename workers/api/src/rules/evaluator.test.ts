@@ -530,3 +530,100 @@ describe("evaluate — Curious Mind regression (D4)", () => {
     expect(result.updatedProgress?.progress).toBe(1);
   });
 });
+
+// -----------------------------------------------------------------------------
+// Deep Diver regression (TASK-013 / F4-a) — locks the POST-migration rule shape
+// from migrations/0005_fix_deep_diver_rule.sql. Migration 0002 originally
+// shipped the filter as `{"durationMin":{"gte":20}}`, but the demo's
+// video.watched payload uses `duration_sec` (seconds). 0005 rewrites the
+// filter to `{"duration_sec":{"gte":1200}}` (1200 s = 20 min). These tests
+// pin the new filter so a future seed rewrite can't silently regress.
+// -----------------------------------------------------------------------------
+
+/**
+ * Mission M6 fixture — mirrors `mis_stream_longform_week` ("Deep Diver")
+ * after migration 0005. 10 long-form (≥ 20 min) video watches per week.
+ * Reward is currency (point/500). NOW falls in the mission's weekly window
+ * (NOW is 2026-05-19 Tue; weekly window is Mon..Sun starting 2026-05-18).
+ */
+const M6_DEEP_DIVER: Mission = {
+  id: "mis_stream_longform_week",
+  title: "Deep Diver",
+  description: "Watch 10 videos over 20 minutes long this week",
+  criteria: {
+    eventName: "video.watched",
+    count: 10,
+    window: "weekly",
+    filter: { duration_sec: { gte: 1200 } },
+  },
+  reward: { kind: "currency", currency: "point", amount: 500 },
+};
+
+describe("evaluate — Deep Diver regression (F4-a, post-0005)", () => {
+  it("55-min documentary (3300 s) matches — first watch goes locked → active 1/10", () => {
+    // Mirrors the prod evidence: Planet Earth III, 3300 s, documentary.
+    const event = makeEvent({
+      name: "video.watched",
+      payload: {
+        videoId: "v_doc_planet",
+        genre: "documentary",
+        duration_sec: 3300,
+      },
+    });
+    const result = evaluate(event, M6_DEEP_DIVER, null, NOW);
+    expect(result.matched).toBe(true);
+    expect(result.newCurrentCount).toBe(1);
+    expect(result.status).toBe("active");
+    expect(result.updatedProgress).toEqual<MissionProgress>({
+      userId: USER,
+      missionId: M6_DEEP_DIVER.id,
+      status: "active",
+      progress: 1 / 10,
+      currentCount: 1,
+      targetCount: 10,
+      updatedAt: NOW,
+    });
+  });
+
+  it("20-min video on the threshold (1200 s) matches (gte boundary)", () => {
+    const event = makeEvent({
+      name: "video.watched",
+      payload: { videoId: "v_recap", duration_sec: 1200 },
+    });
+    const result = evaluate(event, M6_DEEP_DIVER, null, NOW);
+    expect(result.matched).toBe(true);
+  });
+
+  it("10-min video (600 s) does NOT match — under the gte threshold", () => {
+    const event = makeEvent({
+      name: "video.watched",
+      payload: { videoId: "v_short", duration_sec: 600 },
+    });
+    const result = evaluate(event, M6_DEEP_DIVER, null, NOW);
+    expect(result.matched).toBe(false);
+    expect(result.updatedProgress).toBeNull();
+  });
+
+  it("missing duration_sec field does NOT match (host must provide the field)", () => {
+    // Mirrors filter.ts's strict "missing field = no match" semantics —
+    // the same guarantee Curious Mind's regression tests assert for `genre`.
+    const event = makeEvent({
+      name: "video.watched",
+      payload: { videoId: "v_unknown", genre: "drama" },
+    });
+    const result = evaluate(event, M6_DEEP_DIVER, null, NOW);
+    expect(result.matched).toBe(false);
+    expect(result.updatedProgress).toBeNull();
+  });
+
+  it("legacy 'durationMin' field is IGNORED (regression: pre-0005 field is gone)", () => {
+    // Defence-in-depth: even if some host sends the OLD field name,
+    // we must NOT match. The filter's only key is `duration_sec` now.
+    const event = makeEvent({
+      name: "video.watched",
+      payload: { videoId: "v_legacy", durationMin: 60 },
+    });
+    const result = evaluate(event, M6_DEEP_DIVER, null, NOW);
+    expect(result.matched).toBe(false);
+  });
+});
