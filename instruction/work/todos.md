@@ -1,6 +1,6 @@
 # QuestKit — Active Tasks
 
-> Last updated: 2026-05-22 07:35 (TASK-010 shipped as `01b0ad6` v0.1.9; Playwright prod-verify uncovered shared-user defect → TASK-011 v0.1.10 hotfix dispatched)
+> Last updated: 2026-05-22 08:18 (TASK-012 v0.1.11 hotfix — sub-agent F complete; react + demo gates GREEN; awaiting Lead root gates + release)
 
 ## RESUME CONTEXT (v0.1.9 hotfix mid-flight)
 
@@ -480,45 +480,114 @@ If next session asks "มีงานค้างไหม":
   - [x] test (V): Jest spec for resolveDemoUserId 4 cases
   - [x] bump (V): version 0.1.9 → 0.1.10 in package.json, health route, CHANGELOG
   - [x] verify (V): demo gates `pnpm --filter @questkit/demo test/typecheck/lint` all GREEN
-  - [ ] verify (Lead): root gates `pnpm typecheck && lint && test`
-  - [ ] commit (Lead): "v0.1.10 hotfix — per-browser demo user (F2 fix)" via git-commit skill, NO AI signature
-  - [ ] push + monitor (Lead): git-push skill, CI green, deploy green
-  - [ ] prod verify (Lead): `/v1/health` shows 0.1.10; Playwright re-walkthrough (now with private/unique user) — fresh user, 3 doc clicks → 3/3, claim Curious Mind → 200 + badge in BadgeWall
-  - [ ] archive (Lead): `/workflow-end` after user confirmation
+  - [x] verify (Lead): root gates GREEN (14/14 typecheck, 10/10 lint, 500+ tests; worker-api 209/0/1-skip, demo 8/0 incl. 4 new client.test.tsx)
+  - [x] commit (Lead): `accb96c v0.1.10 hotfix — F2 fix (per-browser demo user via localStorage)` — no AI signature
+  - [x] push + monitor (Lead): CI `26261410400` GREEN 3m31s; Deploy `26261520602` workers + smoke GREEN, E2E red (expected — TASK-005 manual gate)
+  - [x] prod verify (Lead): `/v1/health` → `{"ok":true,"version":"0.1.10"}`; Playwright fresh session: `localStorage.questkit_demo_user_id="demo_55a90ed7"` (not shared `demo_user_42`), footer v0.1.10, 2 doc clicks → server 2/3 + display 3/3 (F3 double-bump), claim → 409 → display reverts 3/3→2/3 (v0.1.9 catch + refetch verified end-to-end); 3rd click → server 3/3, claim → 200, BadgeWall 0→1, status=claimed. Screenshot: `agent-temp/v0.1.10-verify-curious-mind-claimed.png`
+  - [ ] archive (Lead): `/workflow-end` after user confirmation on F3 disposition (v0.1.11 vs Phase 10 backlog)
 - **Progress Notes:**
   - 2026-05-22 07:35 - TASK-011 created. Sub-agent V dispatching.
-  - 2026-05-22 07:50 - Sub-agent V complete: Option A chosen — extracted `resolveDemoUserId` to new pure module `apps/demo/src/lib/demoUserId.ts` (75 LOC + JSDoc explaining precedence + private-mode fallback); `client.tsx` re-imports + re-exports. New Jest spec `apps/demo/src/lib/client.test.tsx` has 4 cases (LS hit / cold-mint+write / `?user=` override beats LS / LS throws → per-tab unique). Version bumps applied: root `package.json` 0.1.9 → 0.1.10, `/v1/health` 0.1.9 → 0.1.10, CHANGELOG prepended with full v0.1.10 entry (root cause / fix / why / files / notes). Demo gates all GREEN: test 8/8 across 3 suites (4 new + 4 pre-existing), typecheck clean, lint clean (modulo pre-existing MODULE_TYPELESS_PACKAGE_JSON Node warning unrelated to hotfix). Locks released below.
+  - 2026-05-22 07:42 - Sub-agent V complete. Option A: extracted `resolveDemoUserId` → `demoUserId.ts` pure module, re-exported from `client.tsx`. 4 Jest cases (LS hit / LS miss + mint + write / `?user=` override / LS throws fallback). Version bumps + CHANGELOG. Demo gates GREEN (8 tests).
+  - 2026-05-22 07:48 - Root gates GREEN. Committed `accb96c`. Pushed.
+  - 2026-05-22 07:53 - CI GREEN. Deploy: workers + smoke GREEN, E2E red (expected). `/v1/health` = 0.1.10 confirmed.
+  - 2026-05-22 07:55 - Playwright re-verify on prod: per-browser user `demo_55a90ed7` ✅, F1 silent failure FIXED (v0.1.9 toast + refetch live-verified end-to-end against reproducible 409), F2 shared-user FIXED (v0.1.10). **F3 (display double-bump in useMissions.ts) discovered as new finding** — see F3 section below.
+
+### F3 finding (display double-bump in useMissions.ts — needs separate hotfix)
+
+**Files / lines:**
+
+- `packages/react/src/hooks/useMissions.ts:94-143` (SSE handler, monotonic via `Math.max`)
+- `packages/react/src/hooks/useMissions.ts:149-193` (optimistic `onFireEventSuccess`, `+1` from existing)
+
+**Root cause:** both update paths run on every event. SSE updates `currentCount = Math.max(existing, p.currentCount)` (monotonic but additive-compatible), then optimistic adds `+1` from the now-updated state. Net result: every event increments display by 2 while server only counts +1. Eventually display hits target before server does → claim returns 409 → v0.1.9 recovery path fires (toast + refetch).
+
+**Hard evidence (from this Playwright session):**
+
+- 1st click on Planet Earth III (fresh user `demo_55a90ed7`, server starts at 0): POST `/v1/events` body = ONE event (videoId v_doc_planet, genre documentary, duration_sec 3300). Response: `missionsUpdated:[mis_stream_daily_watch_1, mis_stream_documentary_3]`. After: Daily Watcher 1/1 (correct +1), Curious Mind 2/3 (incorrect +2).
+- Server rule for `mis_stream_documentary_3`: `{"eventName":"video.watched","count":3,"window":"lifetime","filter":{"genre":{"eq":"documentary"}}}` — no count_field, no duration scaling. Should be flat +1 per matched event.
+- 2nd click (Blue Worlds): server 1→2, display 2→3 (capped from 4). Claim → POST `/v1/missions/mis_stream_documentary_3/claim` → HTTP 409 `claim_not_ready`. Console: `[demo] claimMission failed QuestKitError: claim_not_ready`. Display reverted 3/3 → 2/3 (v0.1.9 refetch). Claim button disappeared (no longer claimable).
+- 3rd click (Blue Worlds): server 2→3, display 2→3 (no overshoot at cap). Claim → 200, badge granted, BadgeWall 0→1.
+
+**TASK-007's "non-bug" verdict was wrong:** it analyzed SDK filtering ("hook only bumps IDs server confirmed") but missed the double-count when both SSE and optimistic deliver for the same event.
+
+**Fix options for v0.1.11:**
+
+- **A (simplest):** drop optimistic increment entirely, rely on SSE. Minor UX delay (~50-200ms) before counter reflects.
+- **B (preserves UX):** correlate `eventId` between POST response and SSE delivery so optimistic skips if SSE already delivered for that eventId.
+- **C (cleanest API):** change `/v1/events` response to include new `currentCount` per mission; hook applies authoritative count, no need for `+1` optimistic. Requires SDK type bump.
+
+**Why it's tolerable today:** v0.1.9 demo error toast + refetch makes the resulting 409 RECOVERABLE rather than silent. Users see "Not ready yet" and the display corrects via refetch. UX is degraded but not broken.
+
+- 2026-05-22 07:50 - Sub-agent V complete: Option A chosen — extracted `resolveDemoUserId` to new pure module `apps/demo/src/lib/demoUserId.ts` (75 LOC + JSDoc explaining precedence + private-mode fallback); `client.tsx` re-imports + re-exports. New Jest spec `apps/demo/src/lib/client.test.tsx` has 4 cases (LS hit / cold-mint+write / `?user=` override beats LS / LS throws → per-tab unique). Version bumps applied: root `package.json` 0.1.9 → 0.1.10, `/v1/health` 0.1.9 → 0.1.10, CHANGELOG prepended with full v0.1.10 entry (root cause / fix / why / files / notes). Demo gates all GREEN: test 8/8 across 3 suites (4 new + 4 pre-existing), typecheck clean, lint clean (modulo pre-existing MODULE_TYPELESS_PACKAGE_JSON Node warning unrelated to hotfix). Locks released below.
+
+### Task: [TASK-012] v0.1.11 hotfix — F3 fix (drop optimistic) + browser logging
+
+- **Status:** 🔵 in-progress (sub-agent F dispatched 2026-05-22 08:00)
+- **Priority:** P0 (Phase 9 acceptance gate — without this, F3 still causes 409s even if user-recoverable)
+- **Parallel:** no (single sub-agent + lead release pipeline)
+- **Assigned:** Lead (Opus 4.7) + sub-agent F (Opus 4.7)
+- **Depends on:** TASK-011 (v0.1.10 shipped)
+- **Skills:** git-commit, git-push, deploy
+- **Covers:** F3 — `packages/react/src/hooks/useMissions.ts` double-bump (SSE handler L94-143 + optimistic handler L149-193 both bump per event, display ends +2 from a +1 event)
+- **Root cause:** SSE updates `Math.max(existing, p.currentCount)` (monotonic), then optimistic adds `+1 from existing`. When both fire for same event (the normal happy case), display gets +2 while server counts +1. Eventually display reaches target before server → claim returns 409.
+- **Fix chosen (Option A):** drop optimistic path entirely, SSE is sole source of truth. Trade-off: ~50-200ms delay before counter updates (was instant via optimistic). Acceptable since SSE is typically fast and `useMissionClaim`'s refetch fallback (TASK-001) catches drops on the critical claim path.
+- **Files (sub-agent F):**
+  - `packages/react/src/hooks/useMissions.ts` — remove L149-193 optimistic useEffect, update docblock, add console.debug at SSE handler
+  - `packages/react/test/hooks/useMissions.test.tsx` — update/remove existing optimistic tests, add F3 regression "1 fireEvent = +1 progress, not +2"
+  - `apps/demo/src/lib/useMissionClaim.ts` — add `console.debug("[demo:claim] success", …)` on the success path
+  - `package.json` 0.1.10 → 0.1.11
+  - `workers/api/src/index.ts` /v1/health → 0.1.11
+  - `CHANGELOG.md` — prepend v0.1.11 entry
+- **Subtasks:**
+  - [x] implement (F): drop optimistic + add console.debug logging
+  - [x] test (F): update existing optimistic tests + add F3 regression
+  - [x] bump (F): version 0.1.10 → 0.1.11 + CHANGELOG
+  - [x] verify (F): react + demo gates GREEN
+  - [ ] verify (Lead): root gates
+  - [ ] commit (Lead): "v0.1.11 hotfix — F3 fix (drop optimistic counter) + browser logging" via git-commit skill
+  - [ ] push + monitor (Lead): CI + Deploy
+  - [ ] prod verify (Lead): `/v1/health` 0.1.11; Playwright fresh user, 3 doc clicks → server 3/3 AND display 3/3 (no overshoot); claim 200 + badge; verify console.debug visible in DevTools verbose
+  - [ ] archive (Lead): `/workflow-end` after user confirmation
+- **Progress Notes:**
+  - 2026-05-22 08:00 - TASK-012 created. Sub-agent F dispatching.
+  - 2026-05-22 08:18 - Sub-agent F complete: optimistic +1 removed (deleted `useMissions.ts` L149-193 useEffect + the leading TASK-006 comment block; docblock rewritten to explain SSE-as-sole-source and the trade-off). `console.debug` added at SSE update (`packages/react/src/hooks/useMissions.ts:133`) + claim success (`apps/demo/src/lib/useMissionClaim.ts:69`), guarded with `typeof console !== "undefined" && console.debug !== undefined` for SSR / older runtimes. Optimistic-updates describe block replaced with `f3 regression — no double-bump from optimistic + SSE`: 4 tests (F3 +1-not-+2 pin / fireEvent-without-SSE-noop / console.debug shape spy / monotonic-merge regression preserved for out-of-order SSE). Version bumps applied (root package.json 0.1.10→0.1.11, /v1/health 0.1.10→0.1.11). CHANGELOG v0.1.11 entry prepended with root cause / fix / UX trade-off / observability / validation / files / cross-ref. React gates: test 16 suites/145 tests, typecheck clean, lint clean (modulo pre-existing MODULE_TYPELESS_PACKAGE_JSON Node warning). Demo gates: test 3 suites/8 tests, typecheck clean, lint clean. Locks released below.
 
 ## File Lock Registry
 
-| File                                                                      | Locked by           | Task                        | Since                  |
-| ------------------------------------------------------------------------- | ------------------- | --------------------------- | ---------------------- |
-| _(TASK-005 file locks released 11:30 — code complete)_                    | —                   | —                           | —                      |
-| ~~`packages/types/src/sdk-update.ts`~~ released 11:45                     | ~~TASK-001 Agent~~  | TASK-001 (done)             | 2026-05-21 11:20–11:45 |
-| ~~`packages/react/src/hooks/useMissions.ts`~~ released 11:45              | ~~TASK-001 Agent~~  | TASK-001 (done)             | 2026-05-21 11:20–11:45 |
-| ~~`packages/react/test/hooks/useMissions.test.tsx`~~ released 11:45       | ~~TASK-001 Agent~~  | TASK-001 (done)             | 2026-05-21 11:20–11:45 |
-| ~~`packages/react/test/components/MissionCard.test.tsx`~~ released 11:45  | ~~TASK-001 Agent~~  | TASK-001 (done)             | 2026-05-21 11:20–11:45 |
-| ~~`workers/api/src/routes/missions.ts`~~ released 11:45                   | ~~TASK-001 Agent~~  | TASK-001 (done)             | 2026-05-21 11:20–11:45 |
-| ~~`workers/api/src/routes/missions.test.ts`~~ released 11:45              | ~~TASK-001 Agent~~  | TASK-001 (done)             | 2026-05-21 11:20–11:45 |
-| ~~`apps/demo/src/lib/useMissionClaim.ts`~~ released 11:45                 | ~~TASK-001 Agent~~  | TASK-001 (done)             | 2026-05-21 11:20–11:45 |
-| ~~`workers/api/src/services/ai.ts`~~ released 11:55                       | ~~task-006-agent~~  | TASK-006 (closed-escalated) | 2026-05-21 11:25–11:55 |
-| ~~`apps/demo/src/routes/minigames.tsx`~~ released 11:30                   | ~~TASK-003 Agent~~  | TASK-003 (done)             | 2026-05-21 11:05–11:30 |
-| ~~`apps/demo/e2e/minigames.spec.ts`~~ released 11:30                      | ~~TASK-003 Agent~~  | TASK-003 (done)             | 2026-05-21 11:05–11:30 |
-| ~~`workers/api/test/events.route.test.ts`~~ released 11:30                | ~~TASK-003 Agent~~  | TASK-003 (done)             | 2026-05-21 11:05–11:30 |
-| ~~`apps/demo/src/components/Layout.tsx`~~ released 11:45                  | ~~TASK-004 Agent~~  | TASK-004 (done)             | 2026-05-21 11:25–11:45 |
-| ~~`apps/demo/src/components/Layout.test.tsx`~~ released 11:45             | ~~TASK-004 Agent~~  | TASK-004 (done)             | 2026-05-21 11:25–11:45 |
-| ~~`workers/api/src/rules/evaluator.test.ts`~~ released 11:45              | ~~TASK-004 Agent~~  | TASK-004 (done)             | 2026-05-21 11:25–11:45 |
-| ~~`apps/demo/src/routes/streaming.tsx`~~ released 12:30                   | ~~TASK-002 Agent~~  | TASK-002 (done)             | 2026-05-21 12:10–12:30 |
-| ~~`apps/demo/src/routes/daily.tsx`~~ released 12:30                       | ~~TASK-002 Agent~~  | TASK-002 (done)             | 2026-05-21 12:10–12:30 |
-| ~~`apps/demo/e2e/claim-flow.spec.ts`~~ (new) released 12:30               | ~~TASK-002 Agent~~  | TASK-002 (done)             | 2026-05-21 12:10–12:30 |
-| ~~`apps/demo/e2e/daily.spec.ts`~~ released 12:30                          | ~~TASK-002 Agent~~  | TASK-002 (done)             | 2026-05-21 12:10–12:30 |
-| ~~`apps/demo/e2e/streaming.spec.ts`~~ released 12:30                      | ~~TASK-002 Agent~~  | TASK-002 (done)             | 2026-05-21 12:10–12:30 |
-| ~~`apps/demo/src/components/DemoToastHost.tsx`~~ released 06:50           | ~~D (demo-fix)~~    | TASK-010 (D-done)           | 2026-05-22 06:29–06:50 |
-| ~~`apps/demo/src/lib/useMissionClaim.ts`~~ released 06:50                 | ~~D (demo-fix)~~    | TASK-010 (D-done)           | 2026-05-22 06:29–06:50 |
-| ~~`apps/demo/src/lib/useMissionClaim.test.tsx`~~ (new) released 06:50     | ~~D (demo-fix)~~    | TASK-010 (D-done)           | 2026-05-22 06:29–06:50 |
-| ~~`apps/demo/src/lib/client.tsx`~~ released 07:50                         | ~~V (per-browser)~~ | TASK-011 (V-done)           | 2026-05-22 07:35–07:50 |
-| ~~`apps/demo/src/lib/client.test.tsx`~~ (new) released 07:50              | ~~V (per-browser)~~ | TASK-011 (V-done)           | 2026-05-22 07:35–07:50 |
-| ~~`apps/demo/src/lib/demoUserId.ts`~~ (new, Option A) released 07:50      | ~~V (per-browser)~~ | TASK-011 (V-done)           | 2026-05-22 07:38–07:50 |
-| ~~`package.json` (0.1.9 → 0.1.10)~~ released 07:50                        | ~~V (per-browser)~~ | TASK-011 (V-done)           | 2026-05-22 07:35–07:50 |
-| ~~`workers/api/src/index.ts` (/v1/health 0.1.9 → 0.1.10)~~ released 07:50 | ~~V (per-browser)~~ | TASK-011 (V-done)           | 2026-05-22 07:35–07:50 |
-| ~~`CHANGELOG.md` (v0.1.10 entry)~~ released 07:50                         | ~~V (per-browser)~~ | TASK-011 (V-done)           | 2026-05-22 07:35–07:50 |
+| File                                                                       | Locked by           | Task                        | Since                  |
+| -------------------------------------------------------------------------- | ------------------- | --------------------------- | ---------------------- |
+| _(TASK-005 file locks released 11:30 — code complete)_                     | —                   | —                           | —                      |
+| ~~`packages/types/src/sdk-update.ts`~~ released 11:45                      | ~~TASK-001 Agent~~  | TASK-001 (done)             | 2026-05-21 11:20–11:45 |
+| ~~`packages/react/src/hooks/useMissions.ts`~~ released 11:45               | ~~TASK-001 Agent~~  | TASK-001 (done)             | 2026-05-21 11:20–11:45 |
+| ~~`packages/react/test/hooks/useMissions.test.tsx`~~ released 11:45        | ~~TASK-001 Agent~~  | TASK-001 (done)             | 2026-05-21 11:20–11:45 |
+| ~~`packages/react/test/components/MissionCard.test.tsx`~~ released 11:45   | ~~TASK-001 Agent~~  | TASK-001 (done)             | 2026-05-21 11:20–11:45 |
+| ~~`workers/api/src/routes/missions.ts`~~ released 11:45                    | ~~TASK-001 Agent~~  | TASK-001 (done)             | 2026-05-21 11:20–11:45 |
+| ~~`workers/api/src/routes/missions.test.ts`~~ released 11:45               | ~~TASK-001 Agent~~  | TASK-001 (done)             | 2026-05-21 11:20–11:45 |
+| ~~`apps/demo/src/lib/useMissionClaim.ts`~~ released 11:45                  | ~~TASK-001 Agent~~  | TASK-001 (done)             | 2026-05-21 11:20–11:45 |
+| ~~`workers/api/src/services/ai.ts`~~ released 11:55                        | ~~task-006-agent~~  | TASK-006 (closed-escalated) | 2026-05-21 11:25–11:55 |
+| ~~`apps/demo/src/routes/minigames.tsx`~~ released 11:30                    | ~~TASK-003 Agent~~  | TASK-003 (done)             | 2026-05-21 11:05–11:30 |
+| ~~`apps/demo/e2e/minigames.spec.ts`~~ released 11:30                       | ~~TASK-003 Agent~~  | TASK-003 (done)             | 2026-05-21 11:05–11:30 |
+| ~~`workers/api/test/events.route.test.ts`~~ released 11:30                 | ~~TASK-003 Agent~~  | TASK-003 (done)             | 2026-05-21 11:05–11:30 |
+| ~~`apps/demo/src/components/Layout.tsx`~~ released 11:45                   | ~~TASK-004 Agent~~  | TASK-004 (done)             | 2026-05-21 11:25–11:45 |
+| ~~`apps/demo/src/components/Layout.test.tsx`~~ released 11:45              | ~~TASK-004 Agent~~  | TASK-004 (done)             | 2026-05-21 11:25–11:45 |
+| ~~`workers/api/src/rules/evaluator.test.ts`~~ released 11:45               | ~~TASK-004 Agent~~  | TASK-004 (done)             | 2026-05-21 11:25–11:45 |
+| ~~`apps/demo/src/routes/streaming.tsx`~~ released 12:30                    | ~~TASK-002 Agent~~  | TASK-002 (done)             | 2026-05-21 12:10–12:30 |
+| ~~`apps/demo/src/routes/daily.tsx`~~ released 12:30                        | ~~TASK-002 Agent~~  | TASK-002 (done)             | 2026-05-21 12:10–12:30 |
+| ~~`apps/demo/e2e/claim-flow.spec.ts`~~ (new) released 12:30                | ~~TASK-002 Agent~~  | TASK-002 (done)             | 2026-05-21 12:10–12:30 |
+| ~~`apps/demo/e2e/daily.spec.ts`~~ released 12:30                           | ~~TASK-002 Agent~~  | TASK-002 (done)             | 2026-05-21 12:10–12:30 |
+| ~~`apps/demo/e2e/streaming.spec.ts`~~ released 12:30                       | ~~TASK-002 Agent~~  | TASK-002 (done)             | 2026-05-21 12:10–12:30 |
+| ~~`apps/demo/src/components/DemoToastHost.tsx`~~ released 06:50            | ~~D (demo-fix)~~    | TASK-010 (D-done)           | 2026-05-22 06:29–06:50 |
+| ~~`apps/demo/src/lib/useMissionClaim.ts`~~ released 06:50                  | ~~D (demo-fix)~~    | TASK-010 (D-done)           | 2026-05-22 06:29–06:50 |
+| ~~`apps/demo/src/lib/useMissionClaim.test.tsx`~~ (new) released 06:50      | ~~D (demo-fix)~~    | TASK-010 (D-done)           | 2026-05-22 06:29–06:50 |
+| ~~`apps/demo/src/lib/client.tsx`~~ released 07:50                          | ~~V (per-browser)~~ | TASK-011 (V-done)           | 2026-05-22 07:35–07:50 |
+| ~~`apps/demo/src/lib/client.test.tsx`~~ (new) released 07:50               | ~~V (per-browser)~~ | TASK-011 (V-done)           | 2026-05-22 07:35–07:50 |
+| ~~`apps/demo/src/lib/demoUserId.ts`~~ (new, Option A) released 07:50       | ~~V (per-browser)~~ | TASK-011 (V-done)           | 2026-05-22 07:38–07:50 |
+| ~~`package.json` (0.1.9 → 0.1.10)~~ released 07:50                         | ~~V (per-browser)~~ | TASK-011 (V-done)           | 2026-05-22 07:35–07:50 |
+| ~~`workers/api/src/index.ts` (/v1/health 0.1.9 → 0.1.10)~~ released 07:50  | ~~V (per-browser)~~ | TASK-011 (V-done)           | 2026-05-22 07:35–07:50 |
+| ~~`CHANGELOG.md` (v0.1.10 entry)~~ released 07:50                          | ~~V (per-browser)~~ | TASK-011 (V-done)           | 2026-05-22 07:35–07:50 |
+| ~~`packages/react/src/hooks/useMissions.ts`~~ released 08:18               | ~~F (F3-fix)~~      | TASK-012 (F-done)           | 2026-05-22 08:00–08:18 |
+| ~~`packages/react/test/hooks/useMissions.test.tsx`~~ released 08:18        | ~~F (F3-fix)~~      | TASK-012 (F-done)           | 2026-05-22 08:00–08:18 |
+| ~~`apps/demo/src/lib/useMissionClaim.ts`~~ released 08:18                  | ~~F (F3-fix)~~      | TASK-012 (F-done)           | 2026-05-22 08:00–08:18 |
+| ~~`package.json` (0.1.10 → 0.1.11)~~ released 08:18                        | ~~F (F3-fix)~~      | TASK-012 (F-done)           | 2026-05-22 08:00–08:18 |
+| ~~`workers/api/src/index.ts` (/v1/health 0.1.10 → 0.1.11)~~ released 08:18 | ~~F (F3-fix)~~      | TASK-012 (F-done)           | 2026-05-22 08:00–08:18 |
+| ~~`CHANGELOG.md` (v0.1.11 entry)~~ released 08:18                          | ~~F (F3-fix)~~      | TASK-012 (F-done)           | 2026-05-22 08:00–08:18 |

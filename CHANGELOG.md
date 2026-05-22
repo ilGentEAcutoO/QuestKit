@@ -5,6 +5,117 @@ All notable changes to QuestKit are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.11] — 2026-05-22 — F3 fix + browser logging
+
+Playwright prod-verify of v0.1.10 (per-browser demo user) confirmed F1 +
+F2 were truly fixed but surfaced a third defect (F3): the
+`packages/react/src/hooks/useMissions.ts` hook ran TWO update paths per
+event. The SSE handler applied a monotonic `Math.max` merge on
+`currentCount` (correct on its own), AND the
+`client.onFireEventSuccess` handler added an optimistic `+1` from the
+existing count (also correct on its own). In the normal happy path BOTH
+fired for the same event — POST `/v1/events` returned with the mission
+acknowledged AND the SSE_HUB DO delivered `mission.progress` for the
+same event — and the display advanced by 2 while the server-authoritative
+count advanced by 1. Eventually the display reached `targetCount` while
+the server stayed below, and `POST /v1/missions/:id/claim` returned 409
+`claim_not_ready`. The v0.1.9 demo error toast caught the 409 and
+refetched, so the failure was recoverable, but the UX cost was a
+confusing "Not ready yet" toast on what looked like a complete mission.
+
+### Fixed
+
+- **`packages/react/src/hooks/useMissions.ts` — drop the optimistic
+  `+1` path; SSE is now the sole source of progress updates.** The
+  `useEffect` that subscribed to `client.onFireEventSuccess` and bumped
+  `currentCount + 1` (clamped at `targetCount`) is deleted. The SSE
+  handler is unchanged in logic — same monotonic-merge for
+  `mission.progress`, same unconditional-overwrite for
+  `mission.completed` / `mission.claimed`. The hook's top docblock is
+  rewritten to explain why SSE is now sole-truth and to document the
+  trade-off.
+
+### Added
+
+- **Browser-side `console.debug` observability.** Two new log lines so
+  future regressions are visible in DevTools' Verbose level (hidden by
+  the default filter, so production-noise-free):
+  - `packages/react/src/hooks/useMissions.ts` — `console.debug("[questkit:mission] SSE update", { missionId, type, before, after })`
+    fires once per accepted SSE delivery, BEFORE the merge runs, so it's
+    captured regardless of whether the merge produced a visible change.
+  - `apps/demo/src/lib/useMissionClaim.ts` — `console.debug("[demo:claim] success", { missionId, reward })`
+    fires on the claim-success path, after the reward toast renders. The
+    existing `console.warn("[demo] claimMission failed", err)` stays in
+    the catch block.
+
+- **F3 regression tests in
+  `packages/react/test/hooks/useMissions.test.tsx`.** The pre-existing
+  `describe("optimistic updates from fireEvent (no SSE)")` block is
+  replaced with `describe("F3 regression — no double-bump from
+optimistic + SSE")`. Three load-bearing tests:
+  - `1 fireEvent + 1 SSE delivery results in +1 on display (not +2)` —
+    pre-v0.1.11 this assertion would have failed with `display=2`. It
+    pins the F3 fix.
+  - `fireEvent without SSE delivery does NOT advance the display
+(optimistic path removed)` — guards against a future regression
+    that re-adds the optimistic path silently.
+  - `emits a console.debug log with the expected shape on each accepted
+SSE delivery` — spy on `console.debug`, assert shape.
+  - Plus the original monotonic-merge regression (renamed to
+    `monotonic merge: SSE never lowers currentCount on mission.progress`)
+    is preserved because out-of-order SSE delivery is still a real
+    failure mode the merge must defend against.
+
+### Why
+
+- **UX trade-off:** ~50-200ms delay between POST returning and the
+  counter visibly updating, since the SSE delivery now has to round-trip
+  through the SSE_HUB Durable Object. Previously the optimistic `+1`
+  made the update appear instant. This is acceptable because
+  `useMissionClaim` (TASK-001) already refetches on claim success AND on
+  409, which catches the only critical path where an SSE drop would
+  matter for the end-user flow.
+- **Observability cost:** zero in production — `console.debug` is below
+  the default DevTools filter level, so end users see nothing. Devs flip
+  to Verbose level when investigating future progress-update bugs.
+
+### Validation
+
+- F3 regression test pins "1 fireEvent = +1 progress, not +2" — this
+  test would fail against any v0.1.10 build.
+- React unit tests: GREEN (see full evidence in
+  `instruction/work/todos.md` TASK-012 Progress Notes).
+- Demo unit tests: GREEN.
+- TypeScript + ESLint clean for both `@questkit/react` and
+  `@questkit/demo`.
+
+### Files touched
+
+- `packages/react/src/hooks/useMissions.ts` — drop optimistic effect,
+  rewrite docblock, add `console.debug` at SSE handler
+- `packages/react/test/hooks/useMissions.test.tsx` — replace optimistic
+  describe block with F3 regression describe block
+- `apps/demo/src/lib/useMissionClaim.ts` — add `console.debug` on
+  success path
+- `package.json` 0.1.10 → 0.1.11
+- `workers/api/src/index.ts` `/v1/health` version 0.1.10 → 0.1.11
+- `CHANGELOG.md` (this entry)
+
+### Cross-reference
+
+- Full task spec, root-cause evidence, and sub-agent F report in
+  `instruction/work/todos.md` under TASK-012. The hard evidence (1 click
+  → server +1, display +2, identical event payload) lives in the F3
+  section of TASK-011's progress notes.
+- TASK-007 (Phase 9, "D3 optimistic counter debounce — closed as
+  non-bug") was wrong about the structural impossibility of the bug. Its
+  analysis correctly identified that the SDK only bumps server-confirmed
+  mission ids, but missed that the same SSE-confirmed event would
+  ALSO trigger the optimistic bump, producing the double-count. The
+  v0.1.11 fix supersedes that verdict.
+
+[0.1.11]: https://github.com/ilGentEAcutoO/QuestKit/releases/tag/v0.1.11
+
 ## [0.1.10] — 2026-05-22
 
 Playwright prod-verify of the v0.1.9 F1 hotfix uncovered a second,

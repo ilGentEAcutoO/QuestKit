@@ -60,6 +60,21 @@ export function useMissionClaim(
         // refetch fallback below runs in parallel for the SSE-degraded
         // path so the card converges even when no event lands.
         showToast(result.reward as Reward);
+        // TASK-012 — observability: log claim success so a future regression
+        // in the reward/refetch path is visible alongside the SSE
+        // `[questkit:mission] SSE update` log. `console.debug` is hidden by
+        // the default DevTools filter; flip Verbose level on to see it.
+        // ESLint's `no-console` rule only allows `warn` / `error`, but this
+        // is a deliberate browser-side observability hook — see CHANGELOG
+        // v0.1.11.
+        // eslint-disable-next-line no-console
+        if (typeof console !== "undefined" && console.debug !== undefined) {
+          // eslint-disable-next-line no-console
+          console.debug("[demo:claim] success", {
+            missionId,
+            reward: result.reward,
+          });
+        }
         // Fire-and-forget refetch — never block the user on it, never let
         // its error surface (the claim already succeeded, the toast
         // already rendered, the refetch is purely defensive).
