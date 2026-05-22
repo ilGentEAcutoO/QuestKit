@@ -20,15 +20,21 @@ const config: Config = {
     },
   },
 
-  // Fix-2 attempt (TASK-026c): opt into Docusaurus's experimental SWC JS
-  // loader to bypass the webpack-CJS parser bug that leaves
-  // `require("@theme/...")`, `require("@site/...")`, `require("@generated/...")`
-  // as literal Node requires in the SSG server bundle.
-  future: {
-    faster: {
-      swcJsLoader: true,
-    },
-  },
+  // F13 / v0.1.21: DISABLED `future.faster.swcJsLoader: true`. The flag was
+  // added in TASK-026c to bypass a webpack-CJS parser bug, but it ALSO
+  // strips CSS module class names from the SSR HTML — `.docMainContainer_*`
+  // / `.docRoot_*` (the hashed CSS module classes that own Docusaurus's
+  // sidebar + content flex layout) never landed on the DOM divs, so the
+  // sidebar (aside) and main wrapper both rendered as 1905px display:block
+  // siblings instead of flex children. v0.1.17 → v0.1.20 chased CSS-side
+  // symptoms (Prism, important, preflight, theme.css transitive) but the
+  // actual issue was JS-side: the swc loader wasn't running the CSS
+  // module name-transformation step that webpack's css-loader normally
+  // does. Reverting to the default JS loader brings CSS modules back.
+  //
+  // If the original webpack-CJS parser bug (TASK-026c) returns, address it
+  // with a more targeted fix (e.g. configurePostCss + webpack alias) rather
+  // than swc-loader, which has broader compat issues.
 
   i18n: {
     defaultLocale: "en",

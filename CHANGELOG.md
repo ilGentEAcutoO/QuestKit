@@ -5,6 +5,68 @@ All notable changes to QuestKit are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.21] — 2026-05-22 — F13 (REAL root cause — swcJsLoader stripped CSS modules)
+
+v0.1.17/18/19/20 were all WRONG diagnoses. Each shipped successfully
+(CSS hash changed each time) but the layout stayed broken because
+the CSS-side fixes were addressing symptoms, not the cause.
+
+The ACTUAL root cause: `apps/docs/docusaurus.config.ts` had
+`future: { faster: { swcJsLoader: true } }` (added in TASK-026c).
+The swc JS loader DROPPED CSS module class-name transformation.
+Symptom: CSS bundle had `.docMainContainer_UUXy { display: flex }`
+etc. (Docusaurus's CSS module classes), but rendered SSR HTML had
+NONE of those classes on its divs. The flex rule existed, the DOM
+existed, but no element matched → no flex → sidebar (1905px
+display:block) stacked on top of main wrapper (1905px display:block).
+
+### Fixed
+
+- **`apps/docs/docusaurus.config.ts` — disabled
+  `future.faster.swcJsLoader` (F13).** Back to Docusaurus default
+  JS loader (babel via webpack) which correctly runs css-loader's
+  CSS module name transformation. Sidebar + main wrapper now
+  receive their `.docMainContainer_*` / `.docRoot_*` hashed
+  classes and the flex layout fires.
+
+  If the original TASK-026c webpack-CJS parser bug returns,
+  address it with a targeted fix (configurePostCss + webpack
+  alias) rather than reverting to swcJsLoader.
+
+### What v0.1.17 → v0.1.20 actually did (for the record)
+
+- v0.1.17 (F9-a Prism): valid fix — `Cannot find module './prism-jsonc'`
+  was a real JS bundle init crash. Wasn't the layout issue but real.
+- v0.1.17 (F9-b README Demo CTA): valid UX win, unrelated to docs.
+- v0.1.18 (F10 drop Tailwind important): made utilities non-important.
+  Not the cause but worth keeping (cleaner).
+- v0.1.19 (F11 skip Tailwind preflight in docs custom.css): trade-off
+  worth keeping (avoids preflight clobbering Infima). Not the cause.
+- v0.1.20 (F12 selective import in react theme.css): trade-off
+  worth keeping (cleaner dep graph). Not the cause.
+- v0.1.21 (F13 disable swcJsLoader): THE actual fix.
+
+### Lesson worth its own ADR
+
+CSS-side fixes (v0.1.18-20) were chasing symptoms. The actual issue
+was JS toolchain config that stripped a CSS module transformation.
+**When CSS bundle has the rules but DOM doesn't have the matching
+classes**, the issue is in the JS/JSX pipeline (loader/transformer),
+not in CSS itself. grep for class names in rendered HTML BEFORE
+debugging CSS overrides.
+
+### Verification
+
+- `pnpm typecheck` 14/14 packages clean (no test changes)
+- Pending docs prod re-verify
+
+### Cross-references
+
+- TASK-021 in `instruction/work/todos.md`
+- Continues from v0.1.20 (commit `60aa3ab`)
+- F9 / F10 / F11 / F12 / F13 all address the same user report
+  ("docs site UI เละเทะมาก"); F13 is the actual root cause.
+
 ## [0.1.20] — 2026-05-22 — F12 (root cause — react theme.css transitive Tailwind import)
 
 v0.1.17 → v0.1.18 → v0.1.19 were three CONSECUTIVE attempts to fix
