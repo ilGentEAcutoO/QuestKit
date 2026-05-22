@@ -1,6 +1,6 @@
 # QuestKit — Active Tasks
 
-> Last updated: 2026-05-22 12:25 (TASK-015 v0.1.14 hotfix in flight — sub-agent SC fix for F6 (scratch card preventDefault + user-select) complete; awaiting Lead release pipeline)
+> Last updated: 2026-05-22 12:35 (TASK-015 v0.1.14 shipped as `82caa93` — F6 ScratchCard preventDefault + userSelect:none prod-verified via Playwright `?user=v014_verify` (both canvas + prize wrapper carry userSelect:none, footer reads v0.1.14); **awaiting user confirmation to /workflow-end archive Phase 9**)
 
 ## RESUME CONTEXT (v0.1.9 hotfix mid-flight)
 
