@@ -5,6 +5,84 @@ All notable changes to QuestKit are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.13] — 2026-05-22 — F5 UX batch (in-place minigame cards + multi-currency balance + Documentaries label)
+
+User thorough re-test of v0.1.12 surfaced three UX gaps that obscured
+the working server-side flow. None are functional bugs — server-side
+mission progression, claim, badge granting, SSE delivery all verified
+working in v0.1.12 prod-verify — but the demo UX hid the working
+plumbing behind page navigation, label ambiguity, and a single-currency
+balance display.
+
+### Fixed
+
+- **`apps/demo/src/routes/minigames.tsx` — Lucky Spinner + Scratch
+  Master mission cards now render IN-PLACE on /minigames (F5-a).**
+  Previously the mission cards only existed in the global "Active
+  missions" list on /ecommerce, so users who spun 5 times or
+  scratched 3 times on /minigames had no Claim button visible and
+  thought the badge was broken. Server-side mission progression was
+  already correct (verified via Playwright). Added a new
+  "Mini-game missions" section between the widgets and the
+  "How the mini-games connect" info block: filters
+  `useMissions()` to `["mis_lucky_spinner", "mis_scratch_master"]`,
+  renders each as a `MissionCard` with `useMissionClaim` (preserves
+  v0.1.9 F1 backstop — toast on 409 + refetch convergence). Users
+  can now spin → claim → see badge without leaving /minigames.
+
+- **`apps/demo/src/components/Layout.tsx` — balance header shows all
+  three demo currencies (coin, gem, point) instead of just coin
+  (F5-b).** Variety Pack mission rewards `+5 gem` but the
+  single-currency header rendered only coin, so users had no way to
+  see their gem balance anywhere in the UI. New `BalanceMulti`
+  inline component renders coin with the existing `CoinIcon` brand
+  treatment (preserving v0.1.0–v0.1.12 visual identity) plus gem
+  and point as compact glyph chips. All three always render — zero
+  balance still appears so users discover the currency vocabulary
+  before earning. `useBalance()` (no-arg overload) returns the full
+  `Balance[]` array via SSE-driven upsert. ARIA label includes all
+  three amounts. Demo-only inline JSX — `packages/react/CoinBalance`
+  was NOT modified (its `currency` prop is required by API
+  contract). +3 Layout test specs covering zero-backfill, server
+  amounts, and ARIA shape.
+
+- **`apps/demo/src/routes/streaming.tsx` — "Watched today" widget
+  re-labeled to "Documentaries today" (F5-c).** The widget mirrors
+  `mis_stream_documentary_3` (per TASK-002 Phase 9), so it only
+  counts documentary watches — clicking drama/action/comedy/sport
+  videos did NOT advance it. User experience: "watch แล้ว ไม่ขึ้น
+  ใน watched today บางครั้งบางอัน" ("only sometimes"). Pure copy
+  change: heading + section aria-label + counter aria-label all
+  reworded to make the filter explicit. Layout untouched (single
+  line, same width budget). `apps/demo/e2e/claim-flow.spec.ts`
+  regex updated to match new copy.
+
+### Why this matters
+
+v0.1.9-12 closed F1-F4 (silent claim failure → multi-tenant race →
+double-bump → SpinWheel/Deep Diver/mission.completed). v0.1.13
+closes the UX layer that was hiding the working plumbing. With F5
+landed, a user can: spin 5 times on /minigames → see Claim button
+on the same page → click → badge appears + gem balance updates in
+header.
+
+### Verification
+
+- `pnpm typecheck` 14/14 packages clean
+- `pnpm lint` 10/10 packages clean (modulo pre-existing Node ESM warning)
+- `pnpm test` 500+ tests, 0 failures, 1 pre-existing skip:
+  - `@questkit/react`: 152 tests (unchanged from v0.1.12)
+  - `@questkit/demo`: 11 tests (was 8, +3 from F5-b Layout multi-currency)
+  - `@questkit/worker-api`: 216 tests (unchanged from v0.1.12)
+- Demo gates: minigames.tsx + Layout.tsx + streaming.tsx all
+  typecheck + lint clean per-package
+- Lead release pipeline pending Playwright prod re-verify
+
+### Cross-references
+
+- TASK-014 in `instruction/work/todos.md` for full evidence + per-agent reports
+- Continues from v0.1.12 (commit `aa8df37`)
+
 ## [0.1.12] — 2026-05-22 — F4 batch (SpinWheel visual + mission.completed dedup + Deep Diver field)
 
 User prod inspection of v0.1.11 surfaced three pre-existing UX defects

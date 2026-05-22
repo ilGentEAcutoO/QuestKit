@@ -1,6 +1,15 @@
+import type { Balance } from "@questkit/types";
+
 import { useBalance } from "@questkit/react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { lazy, type ReactElement, Suspense, useEffect, useState } from "react";
+import {
+  lazy,
+  type ReactElement,
+  Suspense,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 
 // Footer reads the canonical version from the monorepo root package.json
@@ -10,6 +19,29 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import pkg from "../../../../package.json";
 
 import { CoinIcon } from "./icons";
+
+// TASK-014 / F5-b — the demo seeds three reward currencies across
+// migrations 0002–0004 (coin via Daily Watcher / Lucky Spinner;
+// gem via Variety Pack; point via Deep Diver). The header MUST show
+// all three even when the server has no row yet so users learn what
+// currencies exist before they've claimed anything. Sorting is fixed
+// (coin → gem → point) so the pill doesn't shuffle as SSE updates land.
+const DEMO_CURRENCIES = ["coin", "gem", "point"] as const;
+type DemoCurrency = (typeof DEMO_CURRENCIES)[number];
+const CURRENCY_GLYPH: Record<DemoCurrency, string> = {
+  coin: "¢",
+  gem: "◆",
+  point: "★",
+};
+const CURRENCY_COLOR_VAR: Record<DemoCurrency, string> = {
+  // coin keeps the existing brand token; gem/point use the existing
+  // demo palette tokens — purple-ish accent for gem, blue-ish for point
+  // so the three are visually distinguishable without introducing new
+  // CSS custom properties.
+  coin: "var(--color-qk-coin)",
+  gem: "oklch(0.62 0.20 320)",
+  point: "oklch(0.58 0.18 250)",
+};
 
 // Defer floating panels to a separate chunk so the initial visual frame
 // (header + main content) ships without their framer-motion / SSE wiring.
@@ -71,28 +103,77 @@ const NAV: NavItem[] = [
   { to: "/minigames", label: "Mini-Games", emoji: "🎰" },
 ];
 
-function CoinBalancePulse(): ReactElement {
-  const balance = useBalance("coin");
+function BalanceMulti(): ReactElement {
+  // List-mode useBalance returns one Balance per currency the server has
+  // a row for. Currencies the user has never earned are absent from the
+  // array — we backfill them at 0 so the pill always renders all three
+  // and the user learns the demo's currency vocabulary (F5-b user
+  // complaint: gem reward was minted but invisible).
+  const state = useBalance();
   const reduced = useReducedMotion();
-  const amount = balance.data?.amount ?? 0;
+
+  const amounts = useMemo<Record<DemoCurrency, number>>(() => {
+    const list = Array.isArray(state.data) ? (state.data as Balance[]) : [];
+    const map: Record<DemoCurrency, number> = { coin: 0, gem: 0, point: 0 };
+    for (const b of list) {
+      if ((DEMO_CURRENCIES as readonly string[]).includes(b.currency)) {
+        map[b.currency as DemoCurrency] = b.amount;
+      }
+    }
+    return map;
+  }, [state.data]);
+
+  // The pulse key is the concatenated state — any currency change
+  // re-runs the scale animation so SSE-driven mints are visually
+  // noticeable. Coin keeps its prominent treatment; gem + point sit
+  // beside it as smaller chips so the header stays compact.
+  const pulseKey = `${amounts.coin}|${amounts.gem}|${amounts.point}`;
+  const ariaLabel = `Current balance: ${amounts.coin} coin, ${amounts.gem} gem, ${amounts.point} point`;
+
   return (
     <motion.div
-      key={amount}
+      key={pulseKey}
       role="status"
       aria-live="polite"
-      aria-label={`Current balance: ${amount} coin`}
+      aria-label={ariaLabel}
       animate={reduced ? { scale: 1 } : { scale: [1, 1.18, 1] }}
       transition={
         reduced ? { duration: 0 } : { duration: 0.4, ease: "easeOut" }
       }
       className="inline-flex items-center gap-2 font-medium tabular-nums"
-      style={{ color: "var(--color-qk-coin)" }}
     >
-      <CoinIcon />
-      <span aria-hidden="true">{amount.toLocaleString()}</span>
-      <span aria-hidden="true" className="text-sm opacity-70">
-        coin
+      {/* Coin — keeps the SVG icon for brand continuity */}
+      <span
+        className="inline-flex items-center gap-1"
+        style={{ color: CURRENCY_COLOR_VAR.coin }}
+        data-currency="coin"
+      >
+        <CoinIcon />
+        <span aria-hidden="true">{amounts.coin.toLocaleString()}</span>
+        <span aria-hidden="true" className="text-sm opacity-70">
+          coin
+        </span>
       </span>
+      {/* Gem + point — compact chips, glyph + amount + label */}
+      {(["gem", "point"] as const).map((c) => (
+        <span
+          key={c}
+          className="inline-flex items-center gap-1 border-l pl-2"
+          style={{
+            color: CURRENCY_COLOR_VAR[c],
+            borderColor: "var(--color-demo-border)",
+          }}
+          data-currency={c}
+        >
+          <span aria-hidden="true" className="text-base leading-none">
+            {CURRENCY_GLYPH[c]}
+          </span>
+          <span aria-hidden="true">{amounts[c].toLocaleString()}</span>
+          <span aria-hidden="true" className="text-sm opacity-70">
+            {c}
+          </span>
+        </span>
+      ))}
     </motion.div>
   );
 }
@@ -172,7 +253,7 @@ export function Layout(): ReactElement {
             className="flex items-center gap-2 rounded-[var(--radius-pill)] px-3 py-1.5 text-sm"
             style={{ background: "var(--color-demo-surface-2)" }}
           >
-            <CoinBalancePulse />
+            <BalanceMulti />
           </div>
         </div>
         <nav aria-label="Demo scenarios (mobile)" className="md:hidden">

@@ -1,5 +1,8 @@
 /**
- * Mini-game corner — renders <SpinWheel> and <ScratchCard> side by side.
+ * Mini-game corner — renders <SpinWheel> and <ScratchCard> side by side,
+ * with their corresponding Lucky Spinner / Scratch Master mission cards
+ * rendered in-place below the widgets so users can claim WITHOUT having
+ * to navigate away to /ecommerce.
  *
  * The widgets carry their own cooldown / reveal logic. We just configure
  * a reasonable set of slices for the wheel and a celebratory prize for
@@ -21,17 +24,50 @@
  *   no currency moves until a future Phase 10 makes that explicit).
  *   Slice labels stay visually varied so the wheel still feels like a
  *   wheel; the rewards under the hood are all `lucky_spinner` badge.
+ *
+ * In-place mission cards (F5-a / TASK-014 — v0.1.13):
+ *   Production inspection of v0.1.12 surfaced a UX gap: spinning /
+ *   scratching ticked server-side mission progress correctly and the
+ *   `mis_lucky_spinner` / `mis_scratch_master` cards flipped to
+ *   "completed" on /ecommerce, but users on /minigames never saw the
+ *   Claim button because the cards only lived in the global "Active
+ *   missions" list on the e-commerce route. After 5 spins the user
+ *   would conclude "badge doesn't work" — they never navigated away to
+ *   find the Claim CTA.
+ *
+ *   Fix: render the two minigame missions in-place below the widgets
+ *   via the same `useMissions()` + `MissionCard` + `useMissionClaim()`
+ *   pattern established for /streaming (TASK-002 / Phase 9). We filter
+ *   the full mission list to the two minigame IDs rather than scoping
+ *   by `campaignId` because these missions live in the default global
+ *   campaign — there's no `camp_minigame_*` to key on. Wiring
+ *   `useMissionClaim({ onClaimed: refetch })` preserves the v0.1.9
+ *   SSE-degraded backstop so the card converges to status="claimed"
+ *   even if the SSE `mission.claimed` broadcast drops.
  */
 import {
+  MissionCard,
   ScratchCard,
   SpinWheel,
   type SpinWheelSlice,
   useEvent,
+  useMissions,
 } from "@questkit/react";
 import { type ReactElement, useState } from "react";
 
 import { useDemoToast } from "../components/DemoToastHost";
 import { SceneHeading } from "../components/SceneHeading";
+import { useMissionClaim } from "../lib/useMissionClaim";
+
+// Mission IDs the in-place cards pin to. Pinned to the two minigame
+// missions seeded by migration 0004 — keep this list in lockstep with
+// the rules that drive `qk.minigame.spin` and `qk.minigame.scratch`.
+// If a future Phase 10 adds new minigame missions, append their IDs
+// here so they show up alongside the widgets that produce them.
+const MINIGAME_MISSION_IDS: readonly string[] = [
+  "mis_lucky_spinner",
+  "mis_scratch_master",
+];
 
 /**
  * Wheel slices — every reward is the Lucky Spinner badge.
@@ -86,6 +122,19 @@ export function MiniGamesRoute(): ReactElement {
   const { fireEvent } = useEvent();
   const [lastWheelLabel, setLastWheelLabel] = useState<string | null>(null);
   const [scratchRevealed, setScratchRevealed] = useState<boolean>(false);
+
+  // Subscribe to the full mission list and filter client-side to the two
+  // minigame IDs. We don't pass a `campaignId` because these missions
+  // live in the global campaign — there's no minigame-only campaign to
+  // scope by. Iterating MissionCard manually (rather than reusing
+  // <MissionList />) keeps us aligned with the /streaming pattern from
+  // TASK-002 and lets us render a friendly empty state while the fetch
+  // is in flight without depending on MissionList's skeleton UI.
+  const missionsState = useMissions();
+  const handleClaim = useMissionClaim({ onClaimed: missionsState.refetch });
+  const minigameMissions = (missionsState.data?.missions ?? []).filter((m) =>
+    MINIGAME_MISSION_IDS.includes(m.id),
+  );
 
   return (
     <div className="space-y-8">
@@ -198,6 +247,50 @@ export function MiniGamesRoute(): ReactElement {
           </p>
         </section>
       </div>
+
+      <section
+        aria-labelledby="minigame-missions-heading"
+        className="space-y-3"
+      >
+        <h3
+          id="minigame-missions-heading"
+          className="text-sm font-semibold uppercase tracking-wide text-[color:var(--color-demo-muted)]"
+        >
+          Mini-game missions
+        </h3>
+        <p className="text-xs" style={{ color: "var(--color-demo-muted)" }}>
+          Each spin or scratch ticks one of these missions. Once a card shows{" "}
+          {`"Claim"`}, press it right here — no need to leave the mini-game
+          corner.
+        </p>
+        {missionsState.isLoading ? (
+          <p
+            role="status"
+            className="text-sm"
+            style={{ color: "var(--color-demo-muted)" }}
+          >
+            Loading mini-game missions…
+          </p>
+        ) : minigameMissions.length > 0 ? (
+          <ul className="flex flex-col gap-3">
+            {minigameMissions.map((mission) => (
+              <li key={mission.id}>
+                <MissionCard
+                  mission={mission}
+                  progress={
+                    missionsState.data?.progress[mission.id] ?? undefined
+                  }
+                  onClaim={handleClaim}
+                />
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm" style={{ color: "var(--color-demo-muted)" }}>
+            No mini-game missions are active right now.
+          </p>
+        )}
+      </section>
 
       <section
         className="rounded-[var(--radius-card)] border p-5 text-sm"

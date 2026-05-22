@@ -158,8 +158,12 @@ test.describe("Claim flow — widgets reconcile to server-claimed state", () => 
 
     // The widget's trophy icon should appear (watchedToday >= target).
     // We anchor on the aria-label text since the 🏆 emoji is in an
-    // aria-hidden div — the count label is the public signal.
-    await expect(page.getByLabel(/3 of 3 watched/i)).toBeVisible();
+    // aria-hidden div — the count label is the public signal. The
+    // documentary-only discriminator was added to the label in v0.1.13 /
+    // TASK-014 (F5-c) so the regex now matches the longer form.
+    await expect(
+      page.getByLabel(/3 of 3 documentaries watched today/i),
+    ).toBeVisible();
 
     // No navigation.
     expect(page.url(), "claim must not navigate").toBe(urlBefore);

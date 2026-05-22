@@ -82,7 +82,12 @@ const CONFETTI_ANGLES = [0, 51, 103, 154, 206, 257, 309];
 // Mission whose currentCount drives the "Today's progress" widget. Pinned
 // to the 3-target streaming mission (Curious Mind) — see migration 0002.
 // We pick this rather than the 1-target Daily Watcher because the widget's
-// copy explicitly says "Unlock the Binge Starter badge at 3."
+// copy explicitly says "Unlock the Binge Starter badge at 3." The heading
+// + aria-labels were retitled to "Documentaries today" in v0.1.13 (F5-c /
+// TASK-014) so the documentary-only discriminator is explicit — without
+// that wording users clicked drama/comedy/sport videos and were confused
+// that the counter didn't tick (those events don't match this mission's
+// filter, by design).
 const STREAM_BINGE_MISSION_ID = "mis_stream_documentary_3";
 const STREAM_BINGE_TARGET = 3;
 
@@ -180,7 +185,7 @@ export function StreamingRoute(): ReactElement {
       />
 
       <section
-        aria-label="Today's progress"
+        aria-label="Today's documentary progress"
         className="flex flex-col gap-3 rounded-[var(--radius-card)] border p-4 sm:flex-row sm:items-center sm:justify-between"
         style={{
           background: "var(--color-demo-surface-2)",
@@ -235,7 +240,7 @@ export function StreamingRoute(): ReactElement {
             </AnimatePresence>
           </div>
           <div>
-            <p className="text-sm font-semibold">Watched today</p>
+            <p className="text-sm font-semibold">Documentaries today</p>
             <p className="text-xs" style={{ color: "var(--color-demo-muted)" }}>
               Unlock the Binge Starter badge at {targetCount}.
             </p>
@@ -243,7 +248,7 @@ export function StreamingRoute(): ReactElement {
         </div>
         <div
           className="flex items-center gap-1.5"
-          aria-label={`${watchedToday} of ${targetCount} watched`}
+          aria-label={`${watchedToday} of ${targetCount} documentaries watched today`}
         >
           {Array.from({ length: targetCount }).map((_, i) => (
             <span
