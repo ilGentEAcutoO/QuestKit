@@ -101,7 +101,28 @@ module.exports = function tailwindPlugin() {
         module: {
           rules: [
             {
+              // F14 / v0.1.22: EXCLUDE .module.css from null-loader. The
+              // original rule (test: /\.css$/) piped ALL CSS through
+              // null-loader on the server bundle to dodge the SSR-eval
+              // problem (Node tries to evaluate CSS as JS). But that
+              // also bypassed css-loader's CSS-modules transformation
+              // for `*.module.css` imports — so React components that
+              // did `import styles from './styles.module.css'` got
+              // `styles = {}` at server-render time, every
+              // `className={styles.docMainContainer}` rendered as
+              // empty string, and Docusaurus's entire layout grid
+              // (sidebar + main flex split) silently disappeared from
+              // the SSR HTML. The CSS bundle still had the hashed
+              // class rules (browser-side bundle is untouched) but
+              // nothing in the rendered DOM matched them, so the
+              // layout collapsed to two stacked display:block divs.
+              // Excluding /\.module\.css$/ lets css-loader produce the
+              // class-name mapping for CSS modules while still
+              // null-loading the non-module global CSS (Infima
+              // default.css, etc.) which IS what we want to skip on
+              // the server.
               test: /\.css$/,
+              exclude: /\.module\.css$/,
               use: require.resolve("null-loader"),
             },
             {

@@ -5,6 +5,90 @@ All notable changes to QuestKit are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.22] — 2026-05-22 — F14 (ACTUAL root cause — null-loader stripped CSS modules)
+
+v0.1.21 also didn't fix it. swcJsLoader wasn't the cause either —
+disabling it didn't restore CSS module classes to the SSR HTML.
+
+The ACTUAL ACTUAL root cause: `apps/docs/src/plugins/tailwind-plugin.js:103-106`
+had a webpack rule routing ALL `.css` files (including `.module.css`)
+through `null-loader` on the server bundle. The intent was to skip
+3rd-party CSS at SSG time. But `null-loader` REPLACES css-loader,
+which is what runs CSS module class-name transformation. So when
+React components did `import styles from './styles.module.css';`,
+the `styles` object on the server was `{}`, every
+`<div className={styles.docMainContainer}>` rendered as
+`<div className="">`, and Docusaurus's flex layout grid silently
+disappeared from the SSR HTML. The browser-side bundle still had
+the hashed class rules (`.docMainContainer_Um4l { display: flex }`)
+but nothing in the SSR DOM matched them.
+
+### Fixed
+
+- **`apps/docs/src/plugins/tailwind-plugin.js` — added
+  `exclude: /\.module\.css$/` to the SSR null-loader rule
+  (F14).** CSS modules now go through css-loader's name
+  transformation (producing `styles.docMainContainer =
+'docMainContainer_Um4l'`); only non-module global CSS (Infima
+  default.css, etc.) still gets null-loaded server-side — which
+  IS what the original comment said the intent was.
+
+  Local build verification:
+
+  ```
+  class="docRoot_eyM7"
+  class="theme-doc-sidebar-container docSidebarContainer_nCiQ"
+  class="docMainContainer_Um4l"
+  ```
+
+  Three hashed CSS module classes that were MISSING in v0.1.17-21.
+
+### The 6-iteration story
+
+For the record, in case future me (or anyone) chases a similar bug:
+
+- v0.1.17 (F9-a Prism `jsonc`): real bug, fixed. Independent of layout.
+- v0.1.17 (F9-b README CTA): UX win, unrelated.
+- v0.1.18 (F10 Tailwind `important`): cleanup, not the cause.
+- v0.1.19 (F11 Tailwind preflight in docs custom.css): cleanup,
+  not the cause.
+- v0.1.20 (F12 react theme.css transitive Tailwind): cleanup,
+  not the cause.
+- v0.1.21 (F13 swcJsLoader): cleanup, not the cause.
+- v0.1.22 (F14 null-loader excluding CSS modules): THE actual fix.
+
+The first 4 cleanups (F10-13) are all legitimately worth keeping —
+each one removes a small papercut. But none of them addressed the
+real issue. The actual issue was 1 character: change `test:` to
+`test: + exclude:` in the SSR webpack rule.
+
+### Lesson worth its own ADR
+
+**When SSR HTML lacks expected class names but the CSS bundle has
+the matching rules, the culprit is in the SSR-side build
+(loaders, plugins, transformers), not in CSS.** Specifically:
+
+- Compare local `pnpm build` output HTML vs CSS bundle
+- grep for the missing class name across `apps/*/src/`
+- Trace the webpack/rspack module rules for `.css` patterns
+
+The diagnostic took 5 wrong attempts because the surface symptom
+(layout broken) suggested CSS. But the SSR HTML lacking class
+names was a JS/webpack symptom from the start.
+
+### Verification
+
+- Local docs build: HTML contains `.docRoot_*`, `.docMainContainer_*`,
+  `.docSidebarContainer_*` hashed classes ✅
+- Pending prod re-verify after deploy
+
+### Cross-references
+
+- TASK-022 in `instruction/work/todos.md`
+- Continues from v0.1.21 (commit `3bcd381`)
+- F9 / F10 / F11 / F12 / F13 / F14 all address the same user
+  report ("docs site UI เละเทะมาก"); F14 is the actual root cause.
+
 ## [0.1.21] — 2026-05-22 — F13 (REAL root cause — swcJsLoader stripped CSS modules)
 
 v0.1.17/18/19/20 were all WRONG diagnoses. Each shipped successfully
