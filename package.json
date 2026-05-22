@@ -1,6 +1,6 @@
 {
   "name": "questkit",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "private": true,
   "packageManager": "pnpm@10.27.0",
   "description": "QuestKit — an embeddable gamification SDK built entirely on Cloudflare's developer platform.",

@@ -5,6 +5,80 @@ All notable changes to QuestKit are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.10] — 2026-05-22
+
+Playwright prod-verify of the v0.1.9 F1 hotfix uncovered a second,
+deeper defect (F2): every visitor to `https://questkit.jairukchan.com`
+was operating as the SAME hardcoded `demo_user_42` user, because the
+demo's `resolveDemoUserId()` defaulted to that literal whenever no
+`?user=` query param was supplied. With multiple concurrent browsers
+all writing to the same server-side state, F1-style verifications were
+fundamentally unreliable — the lead's "first click" on Curious Mind
+jumped the counter 0 → 2/3 in a single event because another visitor
+had already pushed it to 1/3 between snapshots; users reported "I
+clicked the documentary 6 times and nothing happened" once the
+mission hit its completion cap from someone else's clicks.
+
+### Fixed
+
+- **`apps/demo/src/lib/client.tsx` + new `apps/demo/src/lib/demoUserId.ts`
+  — per-browser unique demo user.** `resolveDemoUserId()` extracted to
+  its own module and rewritten so each browser mints a unique
+  `demo_${crypto.randomUUID().slice(0, 8)}` id on first visit, persists
+  it to `window.localStorage["questkit_demo_user_id"]`, and reuses it
+  across subsequent visits / reloads / new tabs on the same origin.
+  Precedence preserved from v0.1.9: SSR fallback → `?user=` query
+  override → localStorage hit → fresh mint + LS write. Private-mode /
+  disabled-storage / quota-exceeded all fall through cleanly to a
+  per-tab unique id (no crash, no persistence). Re-exported from
+  `client.tsx` for any consumer that needs to call it directly.
+
+### Added
+
+- **`apps/demo/src/lib/client.test.tsx` — Jest spec for the new
+  resolver.** Four cases lock the contract: (1) localStorage hit
+  returns the stored id with no fresh mint, (2) cold start mints +
+  writes, (3) `?user=` query override beats localStorage, (4)
+  localStorage.getItem throwing falls through to per-tab unique id
+  without persisting. Each test stubs `window.location`, `crypto.randomUUID`,
+  and `window.localStorage` independently — restored in `afterEach`
+  so jsdom's native impl isn't poisoned.
+
+### Why
+
+- Without this fix, every prod F1-style verification is fundamentally
+  unreliable. The v0.1.9 F1 hotfix DID fix the KV replay symmetry bug,
+  but the validation walkthrough's "Curious Mind jumped 0→2/3 in one
+  click" symptom looked exactly like F1's optimistic counter overshoot
+  was still happening — when in reality it was a concurrent visitor's
+  click landing as a server-side rule-engine increment. With per-browser
+  unique ids, the next Phase 9 verification cycle can trust what it
+  measures.
+
+### Files touched
+
+- `apps/demo/src/lib/client.tsx` — import + re-export the new resolver
+- `apps/demo/src/lib/demoUserId.ts` — NEW pure module
+- `apps/demo/src/lib/client.test.tsx` — NEW Jest spec (4 cases)
+- `package.json` 0.1.9 → 0.1.10
+- `workers/api/src/index.ts` `/v1/health` version 0.1.9 → 0.1.10
+- `CHANGELOG.md` (this entry)
+
+### Notes
+
+- No DB migration. No worker behaviour change. The server side already
+  treats every distinct `userId` as its own scope — the v0.1.10 fix
+  just stops collapsing every visitor into the same scope.
+- The `?user=` override stays in place because Playwright golden-path
+  - manual debugging sessions still want deterministic ids. The new
+    default behaviour only kicks in when no override is present.
+- If a future phase wants signed-in user identity instead of an
+  anonymous per-browser id, replace the localStorage default with a
+  cookie / session token surfaced from `auth.ts` — the resolver shape
+  stays the same.
+
+[0.1.10]: https://github.com/ilGentEAcutoO/QuestKit/releases/tag/v0.1.10
+
 ## [0.1.9] — 2026-05-21
 
 Post-deploy walkthrough on v0.1.8 (Phase 9 TASK-009) surfaced a silent
