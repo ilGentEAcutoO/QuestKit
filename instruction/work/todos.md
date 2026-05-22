@@ -1,6 +1,6 @@
 # QuestKit — Active Tasks
 
-> Last updated: 2026-05-22 08:18 (TASK-012 v0.1.11 hotfix — sub-agent F complete; react + demo gates GREEN; awaiting Lead root gates + release)
+> Last updated: 2026-05-22 08:55 (TASK-012 v0.1.11 shipped as `d6e8e09` — F3 fix prod-verified GREEN, console.debug logs visible end-to-end — awaiting user confirmation to /workflow-end archive Phase 9)
 
 ## RESUME CONTEXT (v0.1.9 hotfix mid-flight)
 
@@ -543,14 +543,16 @@ If next session asks "มีงานค้างไหม":
   - [x] test (F): update existing optimistic tests + add F3 regression
   - [x] bump (F): version 0.1.10 → 0.1.11 + CHANGELOG
   - [x] verify (F): react + demo gates GREEN
-  - [ ] verify (Lead): root gates
-  - [ ] commit (Lead): "v0.1.11 hotfix — F3 fix (drop optimistic counter) + browser logging" via git-commit skill
-  - [ ] push + monitor (Lead): CI + Deploy
-  - [ ] prod verify (Lead): `/v1/health` 0.1.11; Playwright fresh user, 3 doc clicks → server 3/3 AND display 3/3 (no overshoot); claim 200 + badge; verify console.debug visible in DevTools verbose
+  - [x] verify (Lead): root gates GREEN (14/14 typecheck, 10/10 lint; react 145/0 net -5 from F3 refactor, demo 8/0, worker-api 209/0/1-skip, core 116/0, embed 21/0)
+  - [x] commit (Lead): `d6e8e09 v0.1.11 hotfix — F3 fix (drop optimistic counter) + browser logging` — no AI signature
+  - [x] push + monitor (Lead): CI `26263423612` GREEN 3m32s; Deploy `26263535256` workers + smoke GREEN, E2E red (expected — TASK-005 manual gate)
+  - [x] prod verify (Lead): `/v1/health` → `{"ok":true,"version":"0.1.11"}`; Playwright with `?user=v011_clean` (fresh): 1 click → Curious Mind 0→1 (NOT 0→2 like v0.1.10 = **F3 fix confirmed**); 3 clicks → server 3/3 + display 3/3 lockstep (no overshoot); claim → 200, BadgeWall 0→1, status=claimed, **0 errors / 0 warnings**; `[questkit:mission] SSE update` and `[demo:claim] success` debug logs both visible. Screenshot: `agent-temp/v0.1.11-verify-no-overshoot-clean-claim.png`
   - [ ] archive (Lead): `/workflow-end` after user confirmation
 - **Progress Notes:**
   - 2026-05-22 08:00 - TASK-012 created. Sub-agent F dispatching.
   - 2026-05-22 08:18 - Sub-agent F complete: optimistic +1 removed (deleted `useMissions.ts` L149-193 useEffect + the leading TASK-006 comment block; docblock rewritten to explain SSE-as-sole-source and the trade-off). `console.debug` added at SSE update (`packages/react/src/hooks/useMissions.ts:133`) + claim success (`apps/demo/src/lib/useMissionClaim.ts:69`), guarded with `typeof console !== "undefined" && console.debug !== undefined` for SSR / older runtimes. Optimistic-updates describe block replaced with `f3 regression — no double-bump from optimistic + SSE`: 4 tests (F3 +1-not-+2 pin / fireEvent-without-SSE-noop / console.debug shape spy / monotonic-merge regression preserved for out-of-order SSE). Version bumps applied (root package.json 0.1.10→0.1.11, /v1/health 0.1.10→0.1.11). CHANGELOG v0.1.11 entry prepended with root cause / fix / UX trade-off / observability / validation / files / cross-ref. React gates: test 16 suites/145 tests, typecheck clean, lint clean (modulo pre-existing MODULE_TYPELESS_PACKAGE_JSON Node warning). Demo gates: test 3 suites/8 tests, typecheck clean, lint clean. Locks released below.
+  - 2026-05-22 08:42 - Lead root gates GREEN. Committed `d6e8e09`. Pushed. CI GREEN 3m32s. Deploy: workers + smoke GREEN, E2E red (expected — TASK-005 manual gate). `/v1/health` = 0.1.11 confirmed.
+  - 2026-05-22 08:55 - Playwright F3 verify on prod with `?user=v011_clean` (fresh user, bypasses cached `demo_55a90ed7` from v0.1.10 verify): 1 click → 0→1 (NOT 0→2 = **F3 fixed**). 3 clicks total → server 3/3 + display 3/3 lockstep. Claim → 200, BadgeWall 0→1, **0 errors / 0 warnings in console**. Both `[questkit:mission] SSE update` and `[demo:claim] success` debug logs visible end-to-end. F1+F2+F3 all fully closed.
 
 ## File Lock Registry
 
