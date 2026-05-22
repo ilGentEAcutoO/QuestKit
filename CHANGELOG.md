@@ -5,6 +5,50 @@ All notable changes to QuestKit are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.18] — 2026-05-22 — F10 (docs site layout fix — drop Tailwind important)
+
+User report: docs site UI still broken after v0.1.17. Console errors
+0, but sidebar (1905px) was stacking on top of main content (1905px)
+in a single tall column — no left-rail / right-content split. Also
+navbar looked "รก" (cluttered). Both same root cause: F10.
+
+Root cause: `apps/docs/src/css/custom.css` had
+`@import 'tailwindcss' important;` to make Tailwind utilities win
+against Infima compound selectors in MDX examples. But the
+`important` flag promotes EVERY utility (including ones that
+Docusaurus's layout containers `.theme-doc-root`,
+`.docMainContainer_*`, `.docPage_*` happened to also use) to
+`!important`. Tailwind's `display: block !important` clobbered
+Docusaurus's `display: flex` on the layout wrappers, the sidebar
+flexbox grid collapsed to two stacked `display: block` divs, and
+chrome elements like the navbar dual-logo (light/dark variants)
+showed simultaneously instead of being toggled by CSS.
+
+### Fixed
+
+- **`apps/docs/src/css/custom.css` — dropped `important` flag from
+  `@import 'tailwindcss';` (F10).** Trade-off accepted: MDX
+  examples that use Tailwind utility classes may be overridden by
+  Infima compound selectors. Authors who need Tailwind to win can
+  use the `!` per-class modifier (`bg-blue-500!`) — Tailwind v4
+  supports this and it's cleaner than the global flag because it
+  only escalates where actually needed, not everywhere. Updated
+  the file's docblock to record the F10 incident + workaround so
+  future maintainers don't re-add the `important` flag without
+  understanding the cost.
+
+### Verification
+
+- `pnpm typecheck` 14/14 packages clean
+- `pnpm lint` 10/10 packages clean
+- `pnpm test` 11/11 packages, 0 failures (CSS fix only — no test changes)
+- Lead release pipeline pending docs re-verify
+
+### Cross-references
+
+- TASK-019 in `instruction/work/todos.md`
+- Continues from v0.1.17 (commit `72e45d1`)
+
 ## [0.1.17] — 2026-05-22 — F9 (docs site CSS fix + README Demo CTA)
 
 User report: `https://docs.questkit.jairukchan.com/docs/` UI "เละเทะมาก"

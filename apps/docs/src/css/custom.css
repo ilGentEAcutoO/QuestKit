@@ -1,21 +1,26 @@
 /*
  * QuestKit docs — Tailwind v4 + Docusaurus (Infima) integration.
  *
- * The Infima specificity gotcha: Docusaurus ships Infima first and many of its
- * rules use compound selectors (e.g. `.theme-doc-markdown .button`) that beat
- * single-class Tailwind utilities (specificity 0,1,0) regardless of source
- * order. Without intervention, `<div class="bg-blue-500">` in MDX renders
- * with Infima's body colour rather than Tailwind blue.
+ * TASK-018 / v0.1.18 (F10) UPDATE: dropped the `important` flag on the
+ * tailwindcss import. The prior `@import 'tailwindcss' important;` made
+ * EVERY utility !important — including ones that Docusaurus's layout
+ * containers (`.theme-doc-root`, `.docMainContainer_*`, `.docPage_*`)
+ * coincidentally reused. Tailwind's `display: block !important` won the
+ * specificity battle, the layout wrappers lost their `display: flex`,
+ * the sidebar (1905px) stacked on top of the main content (1905px), and
+ * the whole site rendered as a single tall column with no left rail.
  *
- * The supported v4 fix is `@import "tailwindcss" important;` — Tailwind emits
- * every utility with !important, decisively winning against Infima compound
- * selectors. The trade-off is that page-level overrides must themselves use
- * the `!` modifier (e.g. `bg-red-500!`); this is acceptable for a docs site
- * where Tailwind classes appear in MDX examples rather than the site chrome.
+ * Trade-off accepted: MDX examples that use Tailwind utility classes
+ * (e.g. `<div class="bg-blue-500">`) may be overridden by Infima
+ * compound selectors. Authors needing Tailwind to win can use the `!`
+ * modifier per class (`bg-blue-500!`) — Tailwind v4 supports this as
+ * the per-class important syntax. This is cleaner than the global flag
+ * because it only escalates where it's actually needed, instead of
+ * breaking the chrome.
  *
  * Reference: https://tailwindcss.com/docs/styling-with-utility-classes#using-the-important-modifier
  */
-@import 'tailwindcss' important;
+@import 'tailwindcss';
 
 /* Pull in @questkit/react's @theme tokens so MDX examples render with the
  * same OKLCH palette as the demo app — `bg-qk-primary`, `text-qk-coin`, etc. */
