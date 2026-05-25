@@ -55,7 +55,7 @@ catalog:
 
   # Lint / format
   "@antfu/eslint-config": ^3.10.0
-  eslint: ^9.39.0
+  eslint: ^10.4.0
   prettier: ^3.4.2
 
   # Misc shared
