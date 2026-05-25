@@ -59,4 +59,4 @@ catalog:
   prettier: ^3.4.2
 
   # Misc shared
-  "@types/node": ^20.17.0
+  "@types/node": ^25.9.1
