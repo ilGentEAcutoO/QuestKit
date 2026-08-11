@@ -93,7 +93,6 @@ overrides:
   form-data: '>=4.0.6'
   vite: '>=7.3.5'
   esbuild: '>=0.28.1'
-  image-size: 1.2.1
   svgo: '>=3.3.4'
   webpack-dev-server: '>=5.2.6'
   http-proxy-middleware: '>=2.0.10'
