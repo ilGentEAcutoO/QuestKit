@@ -1,5 +1,9 @@
 packages:
-  - "apps/*"
+  # apps/docs intentionally excluded from the workspace install/lockfile.
+  # Docusaurus pulls image-size <=2.0.2 (GHSA-5p2g-fcmc-qvqq) and there is
+  # still no patched release on npm. Re-enable when image-size publishes a fix.
+  - "apps/demo"
+  - "apps/playground"
   - "packages/*"
   - "workers/*"
 
