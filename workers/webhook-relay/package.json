@@ -22,7 +22,7 @@
     "@cloudflare/vitest-pool-workers": "catalog:",
     "@cloudflare/workers-types": "catalog:",
     "@types/node": "catalog:",
-    "@vitest/coverage-istanbul": "^4.1.6",
+    "@vitest/coverage-istanbul": "^4.1.12",
     "typescript": "catalog:",
     "vitest": "catalog:",
     "wrangler": "catalog:"
